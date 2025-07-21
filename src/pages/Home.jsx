@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import ArticleCard from '../components/ArticleCard';
 import ArticleTile from '../components/ArticleTile';
 import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 
 const YOUTUBE_API_KEY = 'AIzaSyB446LgUJAv_8VaFKUIscb2EpBjgEReJJw'; // Replace with your YouTube Data API v3 key
@@ -491,6 +492,7 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
           </button>
           <ArticleCard article={selectedArticle} />
         </div>
+        <Footer />
       </div>
     );
   }
@@ -635,6 +637,7 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
           ))}
         </div>
       </div>
+      <Footer />
     </div>
   );
 };

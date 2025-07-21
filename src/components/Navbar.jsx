@@ -1,8 +1,9 @@
 import React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const Navbar = ({ selectedCategory, onCategoryChange, categories }) => {
   const navItems = [
-    { key: 'all', name: 'Home', color: '#333' },
+    { key: 'all', name: 'Home', color: '#3a86ff' },
     ...Object.entries(categories).map(([key, category]) => ({
       key,
       name: category.name,
@@ -10,69 +11,87 @@ const Navbar = ({ selectedCategory, onCategoryChange, categories }) => {
     }))
   ];
 
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleNavClick = (key) => {
+    if (location.pathname !== '/') {
+      navigate('/');
+    }
+    onCategoryChange(key);
+  };
+
   return (
     <nav style={{
       backgroundColor: '#fff',
-      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
       padding: '0',
       position: 'sticky',
       top: 0,
       zIndex: 1000,
-      borderBottom: '1px solid #e0e0e0'
     }}>
       <div style={{
-        maxWidth: '1200px',
+        maxWidth: '1280px',
         margin: '0 auto',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
+        padding: '0 2rem'
       }}>
         {/* Logo/Brand */}
         <div style={{
-          padding: '1rem 2rem',
-          fontWeight: 'bold',
-          fontSize: '1.5rem',
-          color: '#333'
+          padding: '1.5rem 0 1rem',
+          fontWeight: '700',
+          fontSize: '1.75rem',
+          color: '#222',
+          textAlign: 'center',
+          letterSpacing: '-0.5px'
         }}>
-          📰 TechBlog
+          <span style={{ color: '#3a86ff' }}>Tech</span>Blog
         </div>
 
         {/* Navigation Items */}
         <div style={{
           display: 'flex',
-          gap: '0.5rem',
-          padding: '1rem 2rem'
+          flexWrap: 'wrap',
+          gap: '0.75rem',
+          padding: '0.5rem 0 1.5rem',
+          justifyContent: 'center'
         }}>
           {navItems.map(item => (
             <button
               key={item.key}
-              onClick={() => onCategoryChange(item.key)}
+              onClick={() => handleNavClick(item.key)}
               style={{
                 padding: '0.75rem 1.25rem',
                 border: 'none',
-                borderRadius: '6px',
+                borderRadius: '8px',
                 cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '14px',
+                fontWeight: '600',
+                fontSize: '0.9rem',
                 transition: 'all 0.2s ease',
                 backgroundColor: selectedCategory === item.key 
                   ? item.color 
                   : 'transparent',
                 color: selectedCategory === item.key 
                   ? 'white' 
-                  : item.color,
+                  : '#555',
                 border: selectedCategory === item.key 
                   ? 'none' 
-                  : `1px solid ${item.color}20`
+                  : `1px solid #f0f0f0`,
+                minWidth: 'fit-content',
+                whiteSpace: 'nowrap',
+                boxShadow: selectedCategory === item.key 
+                  ? `0 4px 12px ${item.color}40`
+                  : 'none',
               }}
               onMouseOver={(e) => {
                 if (selectedCategory !== item.key) {
-                  e.target.style.backgroundColor = `${item.color}10`;
+                  e.target.style.backgroundColor = '#f9f9f9';
+                  e.target.style.color = item.color;
                 }
               }}
               onMouseOut={(e) => {
                 if (selectedCategory !== item.key) {
                   e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#555';
                 }
               }}
             >
