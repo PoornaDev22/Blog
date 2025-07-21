@@ -5,18 +5,38 @@ const YOUTUBE_API_KEY = 'AIzaSyB446LgUJAv_8VaFKUIscb2EpBjgEReJJw'; // Replace wi
 const PEXELS_API_KEY = 'sjOBHQHFtx1czvi82hPpWGP0dpuneZTGmrx8kK7G7adkLxvRZDtqzzVT';
 const GEMINI_API_KEY = 'AIzaSyAjyLZntUCRikGurUQVM6ZmSxeyPuZZdl0';
 
+// Define categories with their search queries
+const CATEGORIES = {
+  tech: {
+    name: 'Technology',
+    searchQuery: 'technology programming AI software development coding',
+    color: '#007bff'
+  },
+  sports: {
+    name: 'Sports',
+    searchQuery: 'sports football basketball soccer tennis olympics',
+    color: '#28a745'
+  },
+  politics: {
+    name: 'Politics',
+    searchQuery: 'politics government election policy international news',
+    color: '#dc3545'
+  }
+};
+
 const Home = () => {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [trendingVideoTitles, setTrendingVideoTitles] = useState([]);
+  const [trendingVideosByCategory, setTrendingVideosByCategory] = useState({});
+  const [generatingCategory, setGeneratingCategory] = useState(null);
 
   useEffect(() => {
     fetchArticles();
-    fetchTrendingVideoTitles();
+    fetchAllTrendingVideos();
   }, []);
 
   useEffect(() => {
-    if (trendingVideoTitles.length === 0) return;
+    if (Object.keys(trendingVideosByCategory).length === 0) return;
 
     const targetHour = 10;
     const targetMinute = 10;
@@ -34,15 +54,15 @@ const Home = () => {
     if (timeUntilTarget > 0) {
       console.log(`⏳ Scheduled article generation in ${Math.round(timeUntilTarget / 1000)} seconds`);
       const timer = setTimeout(() => {
-        console.log('🚀 Generating article at scheduled time...');
-        generateArticle();
+        console.log('🚀 Generating articles at scheduled time...');
+        generateAllCategoryArticles();
       }, timeUntilTarget);
 
       return () => clearTimeout(timer);
     } else {
       console.log('🕓 Target time already passed for today. Skipping auto-generation.');
     }
-  }, [trendingVideoTitles]);
+  }, [trendingVideosByCategory]);
 
   async function fetchArticles() {
     try {
@@ -56,15 +76,16 @@ const Home = () => {
     }
   }
 
-  async function fetchTrendingVideoTitles() {
+  async function fetchTrendingVideosForCategory(categoryKey, category) {
     try {
-      // Search for trending tech videos using YouTube Data API v3
-      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=technology%20tech%20programming%20AI%20software&type=video&order=relevance&publishedAfter=${getYesterdayISO()}&maxResults=15&key=${YOUTUBE_API_KEY}`;
+      console.log(`Fetching ${category.name} videos...`);
+      
+      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(category.searchQuery)}&type=video&order=relevance&publishedAfter=${getYesterdayISO()}&maxResults=15&key=${YOUTUBE_API_KEY}`;
       
       const res = await fetch(searchUrl);
       const data = await res.json();
 
-      if (!data.items) throw new Error('No videos returned from YouTube API');
+      if (!data.items) throw new Error(`No ${category.name} videos returned from YouTube API`);
 
       // Extract video titles
       const videoTitles = data.items.map(item => item.snippet.title);
@@ -73,20 +94,51 @@ const Home = () => {
       const filteredTitles = videoTitles.filter(title => 
         title.length > 20 && 
         !title.toLowerCase().includes('shorts') &&
-        !title.toLowerCase().includes('live stream')
+        !title.toLowerCase().includes('live stream') &&
+        !title.toLowerCase().includes('livestream')
       );
 
-      setTrendingVideoTitles(filteredTitles);
-      console.log('Fetched video titles:', filteredTitles);
+      console.log(`✅ Fetched ${filteredTitles.length} ${category.name} video titles`);
+      return filteredTitles;
     } catch (err) {
-      console.error('Failed to fetch YouTube trending videos:', err);
-      alert('⚠ Could not fetch YouTube trending videos. Using fallback titles.');
-      setTrendingVideoTitles([
-        'Revolutionary AI Breakthrough Changes Everything',
-        'The Future of Quantum Computing Explained',
-        'Why Cybersecurity Matters More Than Ever'
-      ]);
+      console.error(`Failed to fetch YouTube trending videos for ${category.name}:`, err);
+      
+      // Fallback titles for each category
+      const fallbackTitles = {
+        tech: [
+          'Revolutionary AI Breakthrough Changes Everything',
+          'The Future of Quantum Computing Explained',
+          'Why Cybersecurity Matters More Than Ever'
+        ],
+        sports: [
+          'Championship Game Highlights and Analysis',
+          'Olympic Records Broken This Season',
+          'Sports Technology Revolution in Training'
+        ],
+        politics: [
+          'Government Policy Changes Explained',
+          'International Relations Update',
+          'Election Analysis and Predictions'
+        ]
+      };
+
+      return fallbackTitles[categoryKey] || [];
     }
+  }
+
+  async function fetchAllTrendingVideos() {
+    const videosByCategory = {};
+    
+    for (const [categoryKey, category] of Object.entries(CATEGORIES)) {
+      const videos = await fetchTrendingVideosForCategory(categoryKey, category);
+      videosByCategory[categoryKey] = videos;
+      
+      // Add small delay between API calls to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    setTrendingVideosByCategory(videosByCategory);
+    console.log('All trending videos fetched:', videosByCategory);
   }
 
   // Helper function to get yesterday's date in ISO format for YouTube API
@@ -165,16 +217,20 @@ const Home = () => {
     }
   };
 
-  const generateArticle = async () => {
-    if (trendingVideoTitles.length === 0) {
-      alert('No trending video titles available');
-      return;
+  const generateArticleForCategory = async (categoryKey) => {
+    const categoryVideos = trendingVideosByCategory[categoryKey];
+    const categoryInfo = CATEGORIES[categoryKey];
+    
+    if (!categoryVideos || categoryVideos.length === 0) {
+      alert(`No trending video titles available for ${categoryInfo.name}`);
+      return false;
     }
 
-    setLoading(true);
+    setGeneratingCategory(categoryKey);
+    
     try {
-      const selectedTitle = trendingVideoTitles[Math.floor(Math.random() * trendingVideoTitles.length)];
-      console.log('Selected video title:', selectedTitle);
+      const selectedTitle = categoryVideos[Math.floor(Math.random() * categoryVideos.length)];
+      console.log(`Selected ${categoryInfo.name} video title:`, selectedTitle);
 
       // Extract key terms from the video title for image search
       const imageKeywords = selectedTitle
@@ -182,13 +238,13 @@ const Home = () => {
         .split(' ')
         .filter(word => word.length > 3)
         .slice(0, 3)
-        .join(' ') || 'technology';
+        .join(' ') || categoryKey;
 
       // Fetch image from Pexels using extracted keywords
       const imageUrl = await fetchPexelsImage(imageKeywords) || 
         'https://images.pexels.com/photos/546819/pexels-photo-546819.jpeg'; // Fallback image
 
-      console.log('🎯 Sending this video title to Gemini for analysis:', selectedTitle);
+      console.log(`🎯 Sending this ${categoryInfo.name} video title to Gemini for analysis:`, selectedTitle);
 
       // Generate article content with Gemini based on the full video title
       const geminiResponse = await fetch(
@@ -201,16 +257,17 @@ const Home = () => {
               {
                 parts: [
                   {
-                    text: `Analyze this video title: "${selectedTitle}". 
+                    text: `Analyze this ${categoryInfo.name.toLowerCase()} video title: "${selectedTitle}". 
 
-Identify what product, technology, or topic this title is about, then write a comprehensive tech blog article about that subject. Do NOT mention the video or that this is based on a video title. Write as if you're an expert explaining the topic directly.
+Identify what specific topic within ${categoryInfo.name.toLowerCase()} this title is about, then write a comprehensive blog article about that subject. Do NOT mention the video or that this is based on a video title. Write as if you're an expert explaining the topic directly.
 
-For example:
-- If the title is about "iPhone 15 Pro Max Review", write about iPhone 15 Pro Max features, specs, and technology
-- If it's about "AI Revolution in 2024", write about artificial intelligence developments and trends
-- If it's about "Tesla Model Y Updates", write about Tesla Model Y and electric vehicle technology
+For ${categoryInfo.name.toLowerCase()} category, make sure to:
+- Focus on the specific ${categoryInfo.name.toLowerCase()} aspect mentioned in the title
+- Provide in-depth analysis and insights
+- Use current and relevant examples
+- Make it engaging for readers interested in ${categoryInfo.name.toLowerCase()}
 
-Create the article in markdown format with headings, paragraphs, and lists. Make it informative and engaging.`,
+Create the article in markdown format with headings, paragraphs, and lists. Make it informative, engaging, and well-structured.`,
                   },
                 ],
               },
@@ -239,12 +296,12 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
           keyword: imageKeywords,
           pubstatus: 'draft',
           slug,
-          imageUrl
-          // Removed sourceVideoTitle since it doesn't exist in Strapi schema
+          imageUrl,
+          category: categoryInfo.name // Add the new category field
         },
       };
 
-      console.log('Sending article data to Strapi:', JSON.stringify(newArticle, null, 2));
+      console.log(`Sending ${categoryInfo.name} article data to Strapi:`, JSON.stringify(newArticle, null, 2));
 
       const strapiResponse = await fetch('https://effortless-connection-2f75f4ee80.strapiapp.com/api/articles', {
         method: 'POST',
@@ -258,40 +315,129 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
         throw new Error('Strapi API error: ' + errorText);
       }
 
-      alert(`✅ Article about the topic from "${selectedTitle}" generated and saved as draft.`);
-
-      await fetchArticles();
+      console.log(`✅ ${categoryInfo.name} article generated successfully`);
+      return true;
     } catch (err) {
-      alert('Error: ' + err.message);
+      console.error(`Error generating ${categoryInfo.name} article:`, err.message);
+      throw err;
+    } finally {
+      setGeneratingCategory(null);
+    }
+  };
+
+  const generateAllCategoryArticles = async () => {
+    setLoading(true);
+    let successCount = 0;
+    let errors = [];
+
+    for (const categoryKey of Object.keys(CATEGORIES)) {
+      try {
+        const success = await generateArticleForCategory(categoryKey);
+        if (success) successCount++;
+        
+        // Add delay between generations to avoid API rate limits
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (err) {
+        errors.push(`${CATEGORIES[categoryKey].name}: ${err.message}`);
+      }
+    }
+
+    setLoading(false);
+
+    if (successCount > 0) {
+      alert(`✅ Successfully generated ${successCount} articles!${errors.length > 0 ? '\n\nErrors:\n' + errors.join('\n') : ''}`);
+      await fetchArticles();
+    } else {
+      alert('❌ Failed to generate any articles:\n' + errors.join('\n'));
+    }
+  };
+
+  const generateSingleCategoryArticle = async (categoryKey) => {
+    setLoading(true);
+    try {
+      const success = await generateArticleForCategory(categoryKey);
+      if (success) {
+        alert(`✅ ${CATEGORIES[categoryKey].name} article generated successfully!`);
+        await fetchArticles();
+      }
+    } catch (err) {
+      alert(`❌ Error generating ${CATEGORIES[categoryKey].name} article: ${err.message}`);
     }
     setLoading(false);
   };
 
   return (
     <div style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
-      <h1>📰 Tech Blog (YouTube Powered)</h1>
+      <h1>📰 Multi-Category Tech Blog (YouTube Powered)</h1>
 
-      <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
-        <p style={{ margin: 0, fontSize: '14px', color: '#666' }}>
-          📺 Trending Video Titles Found: {trendingVideoTitles.length}
-        </p>
+      <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
+        <h3 style={{ margin: '0 0 1rem 0', color: '#333' }}>📺 Trending Videos by Category:</h3>
+        {Object.entries(CATEGORIES).map(([categoryKey, category]) => (
+          <div key={categoryKey} style={{ 
+            margin: '0.5rem 0', 
+            padding: '0.5rem', 
+            backgroundColor: 'white', 
+            borderRadius: '4px',
+            border: `2px solid ${category.color}20`
+          }}>
+            <span style={{ 
+              fontSize: '14px', 
+              color: category.color, 
+              fontWeight: 'bold' 
+            }}>
+              {category.name}: 
+            </span>
+            <span style={{ fontSize: '14px', color: '#666', marginLeft: '0.5rem' }}>
+              {trendingVideosByCategory[categoryKey]?.length || 0} titles found
+            </span>
+          </div>
+        ))}
       </div>
 
-      <button 
-        onClick={generateArticle} 
-        disabled={loading} 
-        style={{ 
-          marginBottom: '1.5rem',
-          padding: '0.5rem 1rem',
-          backgroundColor: loading ? '#ccc' : '#007bff',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: 'pointer'
-        }}
-      >
-        {loading ? 'Generating...' : 'Generate Article from YouTube Trend'}
-      </button>
+      <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <button 
+          onClick={generateAllCategoryArticles} 
+          disabled={loading} 
+          style={{ 
+            padding: '0.75rem 1rem',
+            backgroundColor: loading ? '#ccc' : '#28a745',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            fontWeight: 'bold',
+            flex: '1',
+            minWidth: '200px'
+          }}
+        >
+          {loading ? 'Generating All Articles...' : '🚀 Generate All 3 Category Articles'}
+        </button>
+      </div>
+
+      <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+        {Object.entries(CATEGORIES).map(([categoryKey, category]) => (
+          <button 
+            key={categoryKey}
+            onClick={() => generateSingleCategoryArticle(categoryKey)} 
+            disabled={loading} 
+            style={{ 
+              padding: '0.5rem 1rem',
+              backgroundColor: loading ? '#ccc' : category.color,
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              position: 'relative',
+              opacity: generatingCategory === categoryKey ? 0.7 : 1
+            }}
+          >
+            {generatingCategory === categoryKey ? 
+              `Generating ${category.name}...` : 
+              `📝 Generate ${category.name}`
+            }
+          </button>
+        ))}
+      </div>
 
       {articles.length === 0 && <p>No published articles yet.</p>}
 
