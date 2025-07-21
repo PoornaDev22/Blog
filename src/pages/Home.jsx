@@ -103,6 +103,23 @@ const Home = () => {
     }
   }, [trendingVideosByCategory]);
 
+  // Console log trending stats instead of displaying
+  useEffect(() => {
+    if (!trendingVideosByCategory.tech && !trendingVideosByCategory.sports && !trendingVideosByCategory.politics) return;
+    const techTotal = trendingVideosByCategory.tech?.length || 0;
+    const sportsTotal = trendingVideosByCategory.sports?.length || 0;
+    const politicsTotal = trendingVideosByCategory.politics?.length || 0;
+    const techUnused = techTotal - (techTotal - getAvailableTitlesCount('tech'));
+    const sportsUnused = sportsTotal - (sportsTotal - getAvailableTitlesCount('sports'));
+    const politicsUnused = politicsTotal - (politicsTotal - getAvailableTitlesCount('politics'));
+    const used = usedVideoTitles.size;
+    console.log('Trending Videos by Category:');
+    console.log(`Technology: ${techTotal} total titles, ${getAvailableTitlesCount('tech')} unused`);
+    console.log(`Sports: ${sportsTotal} total titles, ${getAvailableTitlesCount('sports')} unused`);
+    console.log(`Politics: ${politicsTotal} total titles, ${getAvailableTitlesCount('politics')} unused`);
+    console.log(`📊 Usage Statistics: ${used} video titles have been used for articles`);
+  }, [trendingVideosByCategory, usedVideoTitles]);
+
   async function fetchArticles() {
     try {
       const res = await fetch(
@@ -506,65 +523,15 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
       />
       
       <div style={{ padding: '2rem', maxWidth: '1200px', margin: 'auto' }}>
-        <h1>📰 Multi-Category Tech Blog (YouTube Powered)</h1>
 
-        <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
-          <h3 style={{ margin: '0 0 1rem 0', color: '#333' }}>📺 Trending Videos by Category:</h3>
-          {Object.entries(CATEGORIES).map(([categoryKey, category]) => {
-            const totalTitles = trendingVideosByCategory[categoryKey]?.length || 0;
-            const availableTitles = getAvailableTitlesCount(categoryKey);
-            
-            return (
-              <div key={categoryKey} style={{ 
-                margin: '0.5rem 0', 
-                padding: '0.5rem', 
-                backgroundColor: 'white', 
-                borderRadius: '4px',
-                border: `2px solid ${category.color}20`
-              }}>
-                <span style={{ 
-                  fontSize: '14px', 
-                  color: category.color, 
-                  fontWeight: 'bold' 
-                }}>
-                  {category.name}: 
-                </span>
-                <span style={{ fontSize: '14px', color: '#666', marginLeft: '0.5rem' }}>
-                  {totalTitles} total titles, {availableTitles} unused
-                </span>
-                {availableTitles === 0 && totalTitles > 0 && (
-                  <span style={{ 
-                    fontSize: '12px', 
-                    color: '#ff6b6b', 
-                    marginLeft: '0.5rem',
-                    fontStyle: 'italic'
-                  }}>
-                    (All titles used)
-                  </span>
-                )}
-              </div>
-            );
-          })}
-          
-          <div style={{ 
-            marginTop: '1rem', 
-            padding: '0.5rem', 
-            backgroundColor: '#e3f2fd', 
-            borderRadius: '4px',
-            fontSize: '12px',
-            color: '#1565c0'
-          }}>
-            <strong>📊 Usage Statistics:</strong> {usedVideoTitles.size} video titles have been used for articles
-          </div>
-        </div>
-
+        {/* Only keep the Generate All button */}
         <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           <button 
             onClick={generateAllCategoryArticles} 
             disabled={loading} 
             style={{ 
               padding: '0.75rem 1rem',
-              backgroundColor: loading ? '#ccc' : '#28a745',
+              backgroundColor: loading ? '#28a74599' : '#28a745',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
@@ -578,44 +545,7 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
           </button>
         </div>
 
-        <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-          {Object.entries(CATEGORIES).map(([categoryKey, category]) => {
-            const availableTitles = getAvailableTitlesCount(categoryKey);
-            const isDisabled = loading || availableTitles === 0;
-            
-            return (
-              <button 
-                key={categoryKey}
-                onClick={() => generateSingleCategoryArticle(categoryKey)} 
-                disabled={isDisabled}
-                style={{ 
-                  padding: '0.5rem 1rem',
-                  backgroundColor: isDisabled ? '#ccc' : category.color,
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: isDisabled ? 'not-allowed' : 'pointer',
-                  position: 'relative',
-                  opacity: generatingCategory === categoryKey ? 0.7 : 1
-                }}
-              >
-                {generatingCategory === categoryKey ? 
-                  `Generating ${category.name}...` : 
-                  `📝 Generate ${category.name} (${availableTitles} available)`
-                }
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Category title */}
-        <h2 style={{ marginBottom: '1.5rem', color: '#333' }}>
-          {selectedCategory === 'all' 
-            ? 'All Articles' 
-            : `${CATEGORIES[selectedCategory]?.name} Articles`}
-        </h2>
-
-        {/* Article tiles grid */}
+        {/* Restore article tiles grid and no articles message */}
         {filteredArticles.length === 0 && (
           <p style={{ textAlign: 'center', color: '#666', fontSize: '18px' }}>
             No articles available in this category yet.
