@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ArticleCard from '../components/ArticleCard';
+import ArticleTile from '../components/ArticleTile';
+import Navbar from '../components/Navbar';
 
 const YOUTUBE_API_KEY = 'AIzaSyB446LgUJAv_8VaFKUIscb2EpBjgEReJJw'; // Replace with your YouTube Data API v3 key
 const PEXELS_API_KEY = 'sjOBHQHFtx1czvi82hPpWGP0dpuneZTGmrx8kK7G7adkLxvRZDtqzzVT';
@@ -26,10 +28,13 @@ const CATEGORIES = {
 
 const Home = () => {
   const [articles, setArticles] = useState([]);
+  const [filteredArticles, setFilteredArticles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [trendingVideosByCategory, setTrendingVideosByCategory] = useState({});
   const [generatingCategory, setGeneratingCategory] = useState(null);
   const [usedVideoTitles, setUsedVideoTitles] = useState(new Set());
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedArticle, setSelectedArticle] = useState(null);
 
   useEffect(() => {
     fetchArticles();
@@ -50,6 +55,20 @@ const Home = () => {
       console.log('Loaded used video titles:', Array.from(titlesSet));
     }
   }, [articles]);
+
+  // Filter articles based on selected category
+  useEffect(() => {
+    if (selectedCategory === 'all') {
+      setFilteredArticles(articles);
+    } else {
+      const categoryName = CATEGORIES[selectedCategory]?.name;
+      const filtered = articles.filter(article => {
+        const attrs = article.attributes || article;
+        return attrs.category === categoryName;
+      });
+      setFilteredArticles(filtered);
+    }
+  }, [articles, selectedCategory]);
 
   useEffect(() => {
     if (Object.keys(trendingVideosByCategory).length === 0) return;
@@ -418,115 +437,189 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
     ).length;
   };
 
-  return (
-    <div style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
-      <h1>📰 Multi-Category Tech Blog (YouTube Powered)</h1>
+  const handleCategoryChange = (category) => {
+    setSelectedCategory(category);
+    setSelectedArticle(null); // Clear selected article when changing category
+  };
 
-      <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
-        <h3 style={{ margin: '0 0 1rem 0', color: '#333' }}>📺 Trending Videos by Category:</h3>
-        {Object.entries(CATEGORIES).map(([categoryKey, category]) => {
-          const totalTitles = trendingVideosByCategory[categoryKey]?.length || 0;
-          const availableTitles = getAvailableTitlesCount(categoryKey);
-          
-          return (
-            <div key={categoryKey} style={{ 
-              margin: '0.5rem 0', 
-              padding: '0.5rem', 
-              backgroundColor: 'white', 
-              borderRadius: '4px',
-              border: `2px solid ${category.color}20`
-            }}>
-              <span style={{ 
-                fontSize: '14px', 
-                color: category.color, 
-                fontWeight: 'bold' 
-              }}>
-                {category.name}: 
-              </span>
-              <span style={{ fontSize: '14px', color: '#666', marginLeft: '0.5rem' }}>
-                {totalTitles} total titles, {availableTitles} unused
-              </span>
-              {availableTitles === 0 && totalTitles > 0 && (
-                <span style={{ 
-                  fontSize: '12px', 
-                  color: '#ff6b6b', 
-                  marginLeft: '0.5rem',
-                  fontStyle: 'italic'
-                }}>
-                  (All titles used)
-                </span>
-              )}
-            </div>
-          );
-        })}
-        
-        <div style={{ 
-          marginTop: '1rem', 
-          padding: '0.5rem', 
-          backgroundColor: '#e3f2fd', 
-          borderRadius: '4px',
-          fontSize: '12px',
-          color: '#1565c0'
-        }}>
-          <strong>📊 Usage Statistics:</strong> {usedVideoTitles.size} video titles have been used for articles
+  const handleTileClick = (article) => {
+    setSelectedArticle(article);
+  };
+
+  const handleBackToTiles = () => {
+    setSelectedArticle(null);
+  };
+
+  // If an article is selected, show the full article
+  if (selectedArticle) {
+    return (
+      <div>
+        <Navbar 
+          selectedCategory={selectedCategory} 
+          onCategoryChange={handleCategoryChange}
+          categories={CATEGORIES}
+        />
+        <div style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
+          <button 
+            onClick={handleBackToTiles}
+            style={{
+              padding: '0.5rem 1rem',
+              marginBottom: '1rem',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            ← Back to Articles
+          </button>
+          <ArticleCard article={selectedArticle} />
         </div>
       </div>
+    );
+  }
 
-      <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-        <button 
-          onClick={generateAllCategoryArticles} 
-          disabled={loading} 
-          style={{ 
-            padding: '0.75rem 1rem',
-            backgroundColor: loading ? '#ccc' : '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            fontWeight: 'bold',
-            flex: '1',
-            minWidth: '200px'
-          }}
-        >
-          {loading ? 'Generating All Articles...' : '🚀 Generate All 3 Category Articles'}
-        </button>
-      </div>
+  return (
+    <div>
+      <Navbar 
+        selectedCategory={selectedCategory} 
+        onCategoryChange={handleCategoryChange}
+        categories={CATEGORIES}
+      />
+      
+      <div style={{ padding: '2rem', maxWidth: '1200px', margin: 'auto' }}>
+        <h1>📰 Multi-Category Tech Blog (YouTube Powered)</h1>
 
-      <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-        {Object.entries(CATEGORIES).map(([categoryKey, category]) => {
-          const availableTitles = getAvailableTitlesCount(categoryKey);
-          const isDisabled = loading || availableTitles === 0;
-          
-          return (
-            <button 
-              key={categoryKey}
-              onClick={() => generateSingleCategoryArticle(categoryKey)} 
-              disabled={isDisabled}
-              style={{ 
-                padding: '0.5rem 1rem',
-                backgroundColor: isDisabled ? '#ccc' : category.color,
-                color: 'white',
-                border: 'none',
+        <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
+          <h3 style={{ margin: '0 0 1rem 0', color: '#333' }}>📺 Trending Videos by Category:</h3>
+          {Object.entries(CATEGORIES).map(([categoryKey, category]) => {
+            const totalTitles = trendingVideosByCategory[categoryKey]?.length || 0;
+            const availableTitles = getAvailableTitlesCount(categoryKey);
+            
+            return (
+              <div key={categoryKey} style={{ 
+                margin: '0.5rem 0', 
+                padding: '0.5rem', 
+                backgroundColor: 'white', 
                 borderRadius: '4px',
-                cursor: isDisabled ? 'not-allowed' : 'pointer',
-                position: 'relative',
-                opacity: generatingCategory === categoryKey ? 0.7 : 1
-              }}
-            >
-              {generatingCategory === categoryKey ? 
-                `Generating ${category.name}...` : 
-                `📝 Generate ${category.name} (${availableTitles} available)`
-              }
-            </button>
-          );
-        })}
+                border: `2px solid ${category.color}20`
+              }}>
+                <span style={{ 
+                  fontSize: '14px', 
+                  color: category.color, 
+                  fontWeight: 'bold' 
+                }}>
+                  {category.name}: 
+                </span>
+                <span style={{ fontSize: '14px', color: '#666', marginLeft: '0.5rem' }}>
+                  {totalTitles} total titles, {availableTitles} unused
+                </span>
+                {availableTitles === 0 && totalTitles > 0 && (
+                  <span style={{ 
+                    fontSize: '12px', 
+                    color: '#ff6b6b', 
+                    marginLeft: '0.5rem',
+                    fontStyle: 'italic'
+                  }}>
+                    (All titles used)
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          
+          <div style={{ 
+            marginTop: '1rem', 
+            padding: '0.5rem', 
+            backgroundColor: '#e3f2fd', 
+            borderRadius: '4px',
+            fontSize: '12px',
+            color: '#1565c0'
+          }}>
+            <strong>📊 Usage Statistics:</strong> {usedVideoTitles.size} video titles have been used for articles
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <button 
+            onClick={generateAllCategoryArticles} 
+            disabled={loading} 
+            style={{ 
+              padding: '0.75rem 1rem',
+              backgroundColor: loading ? '#ccc' : '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold',
+              flex: '1',
+              minWidth: '200px'
+            }}
+          >
+            {loading ? 'Generating All Articles...' : '🚀 Generate All 3 Category Articles'}
+          </button>
+        </div>
+
+        <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+          {Object.entries(CATEGORIES).map(([categoryKey, category]) => {
+            const availableTitles = getAvailableTitlesCount(categoryKey);
+            const isDisabled = loading || availableTitles === 0;
+            
+            return (
+              <button 
+                key={categoryKey}
+                onClick={() => generateSingleCategoryArticle(categoryKey)} 
+                disabled={isDisabled}
+                style={{ 
+                  padding: '0.5rem 1rem',
+                  backgroundColor: isDisabled ? '#ccc' : category.color,
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: isDisabled ? 'not-allowed' : 'pointer',
+                  position: 'relative',
+                  opacity: generatingCategory === categoryKey ? 0.7 : 1
+                }}
+              >
+                {generatingCategory === categoryKey ? 
+                  `Generating ${category.name}...` : 
+                  `📝 Generate ${category.name} (${availableTitles} available)`
+                }
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Category title */}
+        <h2 style={{ marginBottom: '1.5rem', color: '#333' }}>
+          {selectedCategory === 'all' 
+            ? 'All Articles' 
+            : `${CATEGORIES[selectedCategory]?.name} Articles`}
+        </h2>
+
+        {/* Article tiles grid */}
+        {filteredArticles.length === 0 && (
+          <p style={{ textAlign: 'center', color: '#666', fontSize: '18px' }}>
+            No articles available in this category yet.
+          </p>
+        )}
+
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
+          gap: '1.5rem',
+          marginBottom: '2rem'
+        }}>
+          {filteredArticles.map(article => (
+            <ArticleTile 
+              key={article.id} 
+              article={article.attributes || article} 
+              onClick={() => handleTileClick(article.attributes || article)}
+            />
+          ))}
+        </div>
       </div>
-
-      {articles.length === 0 && <p>No published articles yet.</p>}
-
-      {articles.map(article => (
-        <ArticleCard key={article.id} article={article.attributes || article} />
-      ))}
     </div>
   );
 };
