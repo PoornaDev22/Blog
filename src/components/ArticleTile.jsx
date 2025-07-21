@@ -35,6 +35,9 @@ const ArticleTile = ({ article, onClick }) => {
   return (
     <div 
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyPress={e => { if (e.key === 'Enter' || e.key === ' ') onClick && onClick(); }}
       style={{
         backgroundColor: '#fff',
         borderRadius: '12px',

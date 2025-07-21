@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import ArticleCard from '../components/ArticleCard';
 import ArticleTile from '../components/ArticleTile';
 import Navbar from '../components/Navbar';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 
 const YOUTUBE_API_KEY = 'AIzaSyB446LgUJAv_8VaFKUIscb2EpBjgEReJJw'; // Replace with your YouTube Data API v3 key
 const PEXELS_API_KEY = 'sjOBHQHFtx1czvi82hPpWGP0dpuneZTGmrx8kK7G7adkLxvRZDtqzzVT';
@@ -34,7 +35,9 @@ const Home = () => {
   const [generatingCategory, setGeneratingCategory] = useState(null);
   const [usedVideoTitles, setUsedVideoTitles] = useState(new Set());
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedArticle, setSelectedArticle] = useState(null);
+  const navigate = useNavigate();
+  const { slug } = useParams();
+  const location = useLocation();
 
   useEffect(() => {
     fetchArticles();
@@ -439,16 +442,28 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
 
   const handleCategoryChange = (category) => {
     setSelectedCategory(category);
-    setSelectedArticle(null); // Clear selected article when changing category
+    // setSelectedArticle(null); // Clear selected article when changing category
   };
 
+  // When a tile is clicked, navigate to /article/:slug
   const handleTileClick = (article) => {
-    setSelectedArticle(article);
+    if (article.slug) {
+      navigate(`/article/${article.slug}`);
+    }
   };
 
+  // When back button is clicked, go back to the article list
   const handleBackToTiles = () => {
-    setSelectedArticle(null);
+    navigate('/');
   };
+
+  // Find the selected article by slug if on /article/:slug
+  let selectedArticle = null;
+  if (slug && articles.length > 0) {
+    selectedArticle = articles
+      .map(a => a.attributes || a)
+      .find(a => a.slug === slug);
+  }
 
   // If an article is selected, show the full article
   if (selectedArticle) {
