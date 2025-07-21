@@ -29,11 +29,27 @@ const Home = () => {
   const [loading, setLoading] = useState(false);
   const [trendingVideosByCategory, setTrendingVideosByCategory] = useState({});
   const [generatingCategory, setGeneratingCategory] = useState(null);
+  const [usedVideoTitles, setUsedVideoTitles] = useState(new Set());
 
   useEffect(() => {
     fetchArticles();
     fetchAllTrendingVideos();
   }, []);
+
+  // Load used video titles when articles are fetched
+  useEffect(() => {
+    if (articles.length > 0) {
+      const titlesSet = new Set();
+      articles.forEach(article => {
+        const attrs = article.attributes || article;
+        if (attrs.keyword) {
+          titlesSet.add(attrs.keyword.toLowerCase().trim());
+        }
+      });
+      setUsedVideoTitles(titlesSet);
+      console.log('Loaded used video titles:', Array.from(titlesSet));
+    }
+  }, [articles]);
 
   useEffect(() => {
     if (Object.keys(trendingVideosByCategory).length === 0) return;
@@ -217,6 +233,20 @@ const Home = () => {
     }
   };
 
+  // Function to find an unused video title for a category
+  const findUnusedVideoTitle = (categoryVideos) => {
+    const availableTitles = categoryVideos.filter(title => 
+      !usedVideoTitles.has(title.toLowerCase().trim())
+    );
+    
+    if (availableTitles.length === 0) {
+      console.log('⚠️ No unused video titles available');
+      return null;
+    }
+    
+    return availableTitles[Math.floor(Math.random() * availableTitles.length)];
+  };
+
   const generateArticleForCategory = async (categoryKey) => {
     const categoryVideos = trendingVideosByCategory[categoryKey];
     const categoryInfo = CATEGORIES[categoryKey];
@@ -226,10 +256,17 @@ const Home = () => {
       return false;
     }
 
+    // Find an unused video title
+    const selectedTitle = findUnusedVideoTitle(categoryVideos);
+    
+    if (!selectedTitle) {
+      alert(`No unused video titles available for ${categoryInfo.name}. All titles have been used for articles already.`);
+      return false;
+    }
+
     setGeneratingCategory(categoryKey);
     
     try {
-      const selectedTitle = categoryVideos[Math.floor(Math.random() * categoryVideos.length)];
       console.log(`Selected ${categoryInfo.name} video title:`, selectedTitle);
 
       // Extract key terms from the video title for image search
@@ -293,11 +330,11 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
         data: {
           title,
           content: blocks,
-          keyword: imageKeywords,
+          keyword: selectedTitle, // Save the full video title as the keyword
           pubstatus: 'draft',
           slug,
           imageUrl,
-          category: categoryInfo.name // Add the new category field
+          category: categoryInfo.name
         },
       };
 
@@ -315,7 +352,12 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
         throw new Error('Strapi API error: ' + errorText);
       }
 
+      // Add the used title to our tracking set
+      setUsedVideoTitles(prev => new Set([...prev, selectedTitle.toLowerCase().trim()]));
+      
       console.log(`✅ ${categoryInfo.name} article generated successfully`);
+      console.log(`📝 Video title saved as keyword: ${selectedTitle}`);
+      
       return true;
     } catch (err) {
       console.error(`Error generating ${categoryInfo.name} article:`, err.message);
@@ -366,32 +408,68 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
     setLoading(false);
   };
 
+  // Helper function to get available titles count for each category
+  const getAvailableTitlesCount = (categoryKey) => {
+    const categoryVideos = trendingVideosByCategory[categoryKey];
+    if (!categoryVideos) return 0;
+    
+    return categoryVideos.filter(title => 
+      !usedVideoTitles.has(title.toLowerCase().trim())
+    ).length;
+  };
+
   return (
     <div style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
       <h1>📰 Multi-Category Tech Blog (YouTube Powered)</h1>
 
       <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
         <h3 style={{ margin: '0 0 1rem 0', color: '#333' }}>📺 Trending Videos by Category:</h3>
-        {Object.entries(CATEGORIES).map(([categoryKey, category]) => (
-          <div key={categoryKey} style={{ 
-            margin: '0.5rem 0', 
-            padding: '0.5rem', 
-            backgroundColor: 'white', 
-            borderRadius: '4px',
-            border: `2px solid ${category.color}20`
-          }}>
-            <span style={{ 
-              fontSize: '14px', 
-              color: category.color, 
-              fontWeight: 'bold' 
+        {Object.entries(CATEGORIES).map(([categoryKey, category]) => {
+          const totalTitles = trendingVideosByCategory[categoryKey]?.length || 0;
+          const availableTitles = getAvailableTitlesCount(categoryKey);
+          
+          return (
+            <div key={categoryKey} style={{ 
+              margin: '0.5rem 0', 
+              padding: '0.5rem', 
+              backgroundColor: 'white', 
+              borderRadius: '4px',
+              border: `2px solid ${category.color}20`
             }}>
-              {category.name}: 
-            </span>
-            <span style={{ fontSize: '14px', color: '#666', marginLeft: '0.5rem' }}>
-              {trendingVideosByCategory[categoryKey]?.length || 0} titles found
-            </span>
-          </div>
-        ))}
+              <span style={{ 
+                fontSize: '14px', 
+                color: category.color, 
+                fontWeight: 'bold' 
+              }}>
+                {category.name}: 
+              </span>
+              <span style={{ fontSize: '14px', color: '#666', marginLeft: '0.5rem' }}>
+                {totalTitles} total titles, {availableTitles} unused
+              </span>
+              {availableTitles === 0 && totalTitles > 0 && (
+                <span style={{ 
+                  fontSize: '12px', 
+                  color: '#ff6b6b', 
+                  marginLeft: '0.5rem',
+                  fontStyle: 'italic'
+                }}>
+                  (All titles used)
+                </span>
+              )}
+            </div>
+          );
+        })}
+        
+        <div style={{ 
+          marginTop: '1rem', 
+          padding: '0.5rem', 
+          backgroundColor: '#e3f2fd', 
+          borderRadius: '4px',
+          fontSize: '12px',
+          color: '#1565c0'
+        }}>
+          <strong>📊 Usage Statistics:</strong> {usedVideoTitles.size} video titles have been used for articles
+        </div>
       </div>
 
       <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -415,28 +493,33 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
       </div>
 
       <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-        {Object.entries(CATEGORIES).map(([categoryKey, category]) => (
-          <button 
-            key={categoryKey}
-            onClick={() => generateSingleCategoryArticle(categoryKey)} 
-            disabled={loading} 
-            style={{ 
-              padding: '0.5rem 1rem',
-              backgroundColor: loading ? '#ccc' : category.color,
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              position: 'relative',
-              opacity: generatingCategory === categoryKey ? 0.7 : 1
-            }}
-          >
-            {generatingCategory === categoryKey ? 
-              `Generating ${category.name}...` : 
-              `📝 Generate ${category.name}`
-            }
-          </button>
-        ))}
+        {Object.entries(CATEGORIES).map(([categoryKey, category]) => {
+          const availableTitles = getAvailableTitlesCount(categoryKey);
+          const isDisabled = loading || availableTitles === 0;
+          
+          return (
+            <button 
+              key={categoryKey}
+              onClick={() => generateSingleCategoryArticle(categoryKey)} 
+              disabled={isDisabled}
+              style={{ 
+                padding: '0.5rem 1rem',
+                backgroundColor: isDisabled ? '#ccc' : category.color,
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                position: 'relative',
+                opacity: generatingCategory === categoryKey ? 0.7 : 1
+              }}
+            >
+              {generatingCategory === categoryKey ? 
+                `Generating ${category.name}...` : 
+                `📝 Generate ${category.name} (${availableTitles} available)`
+              }
+            </button>
+          );
+        })}
       </div>
 
       {articles.length === 0 && <p>No published articles yet.</p>}
