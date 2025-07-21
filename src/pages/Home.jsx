@@ -1,22 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import ArticleCard from '../components/ArticleCard';
 
-const NEWS_API_KEY = 'df8b6c88c865419a93ca5a8f81e3e23b';
+const YOUTUBE_API_KEY = 'AIzaSyB446LgUJAv_8VaFKUIscb2EpBjgEReJJw'; // Replace with your YouTube Data API v3 key
 const PEXELS_API_KEY = 'sjOBHQHFtx1czvi82hPpWGP0dpuneZTGmrx8kK7G7adkLxvRZDtqzzVT';
 const GEMINI_API_KEY = 'AIzaSyAjyLZntUCRikGurUQVM6ZmSxeyPuZZdl0';
 
 const Home = () => {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [trendingKeywords, setTrendingKeywords] = useState([]);
+  const [trendingVideoTitles, setTrendingVideoTitles] = useState([]);
 
   useEffect(() => {
     fetchArticles();
-    fetchTrendingKeywords();
+    fetchTrendingVideoTitles();
   }, []);
 
   useEffect(() => {
-    if (trendingKeywords.length === 0) return;
+    if (trendingVideoTitles.length === 0) return;
 
     const targetHour = 8;
     const targetMinute = 15;
@@ -42,7 +42,7 @@ const Home = () => {
     } else {
       console.log('🕓 Target time already passed for today. Skipping auto-generation.');
     }
-  }, [trendingKeywords]);
+  }, [trendingVideoTitles]);
 
   async function fetchArticles() {
     try {
@@ -56,26 +56,44 @@ const Home = () => {
     }
   }
 
-  async function fetchTrendingKeywords() {
+  async function fetchTrendingVideoTitles() {
     try {
-      const res = await fetch(
-        `https://newsapi.org/v2/top-headlines?country=us&category=technology&pageSize=10&apiKey=${NEWS_API_KEY}`
-      );
+      // Search for trending tech videos using YouTube Data API v3
+      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=technology%20tech%20programming%20AI%20software&type=video&order=relevance&publishedAfter=${getYesterdayISO()}&maxResults=15&key=${YOUTUBE_API_KEY}`;
+      
+      const res = await fetch(searchUrl);
       const data = await res.json();
 
-      if (!data.articles) throw new Error('No articles returned');
+      if (!data.items) throw new Error('No videos returned from YouTube API');
 
-      const trends = data.articles.map(article =>
-        article.title.split(' ').slice(0, 3).join(' ')
+      // Extract video titles
+      const videoTitles = data.items.map(item => item.snippet.title);
+      
+      // Filter out titles that are too short or generic
+      const filteredTitles = videoTitles.filter(title => 
+        title.length > 20 && 
+        !title.toLowerCase().includes('shorts') &&
+        !title.toLowerCase().includes('live stream')
       );
 
-      const uniqueTrends = [...new Set(trends)];
-      setTrendingKeywords(uniqueTrends);
+      setTrendingVideoTitles(filteredTitles);
+      console.log('Fetched video titles:', filteredTitles);
     } catch (err) {
-      console.error('Failed to fetch tech trends:', err);
-      alert('⚠ Could not fetch tech trending keywords. Using fallback.');
-      setTrendingKeywords(['AI', 'Cybersecurity', 'Quantum Computing']);
+      console.error('Failed to fetch YouTube trending videos:', err);
+      alert('⚠ Could not fetch YouTube trending videos. Using fallback titles.');
+      setTrendingVideoTitles([
+        'Revolutionary AI Breakthrough Changes Everything',
+        'The Future of Quantum Computing Explained',
+        'Why Cybersecurity Matters More Than Ever'
+      ]);
     }
+  }
+
+  // Helper function to get yesterday's date in ISO format for YouTube API
+  function getYesterdayISO() {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toISOString();
   }
 
   function generateSlug(title) {
@@ -138,7 +156,7 @@ const Home = () => {
       
       const data = await response.json();
       if (data.photos && data.photos.length > 0) {
-        return data.photos[0].src.medium; // Using medium size image
+        return data.photos[0].src.medium;
       }
       return null;
     } catch (error) {
@@ -148,21 +166,31 @@ const Home = () => {
   };
 
   const generateArticle = async () => {
-    if (trendingKeywords.length === 0) {
-      alert('No trending keywords available');
+    if (trendingVideoTitles.length === 0) {
+      alert('No trending video titles available');
       return;
     }
 
     setLoading(true);
     try {
-      const keyword = trendingKeywords[Math.floor(Math.random() * trendingKeywords.length)];
-      console.log('Selected keyword:', keyword);
+      const selectedTitle = trendingVideoTitles[Math.floor(Math.random() * trendingVideoTitles.length)];
+      console.log('Selected video title:', selectedTitle);
 
-      // Fetch image from Pexels
-      const imageUrl = await fetchPexelsImage(keyword) || 
+      // Extract key terms from the video title for image search
+      const imageKeywords = selectedTitle
+        .replace(/[^\w\s]/g, '')
+        .split(' ')
+        .filter(word => word.length > 3)
+        .slice(0, 3)
+        .join(' ') || 'technology';
+
+      // Fetch image from Pexels using extracted keywords
+      const imageUrl = await fetchPexelsImage(imageKeywords) || 
         'https://images.pexels.com/photos/546819/pexels-photo-546819.jpeg'; // Fallback image
 
-      // Generate article content with Gemini
+      console.log('🎯 Sending this video title to Gemini for analysis:', selectedTitle);
+
+      // Generate article content with Gemini based on the full video title
       const geminiResponse = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
         {
@@ -173,7 +201,16 @@ const Home = () => {
               {
                 parts: [
                   {
-                    text: `Write a detailed tech blog article about ${keyword} in markdown format with headings, paragraphs, and lists.`,
+                    text: `Analyze this video title: "${selectedTitle}". 
+
+Identify what product, technology, or topic this title is about, then write a comprehensive tech blog article about that subject. Do NOT mention the video or that this is based on a video title. Write as if you're an expert explaining the topic directly.
+
+For example:
+- If the title is about "iPhone 15 Pro Max Review", write about iPhone 15 Pro Max features, specs, and technology
+- If it's about "AI Revolution in 2024", write about artificial intelligence developments and trends
+- If it's about "Tesla Model Y Updates", write about Tesla Model Y and electric vehicle technology
+
+Create the article in markdown format with headings, paragraphs, and lists. Make it informative and engaging.`,
                   },
                 ],
               },
@@ -199,12 +236,15 @@ const Home = () => {
         data: {
           title,
           content: blocks,
-          keyword,
+          keyword: imageKeywords,
           pubstatus: 'draft',
           slug,
           imageUrl
+          // Removed sourceVideoTitle since it doesn't exist in Strapi schema
         },
       };
+
+      console.log('Sending article data to Strapi:', JSON.stringify(newArticle, null, 2));
 
       const strapiResponse = await fetch('https://effortless-connection-2f75f4ee80.strapiapp.com/api/articles', {
         method: 'POST',
@@ -214,10 +254,11 @@ const Home = () => {
 
       if (!strapiResponse.ok) {
         const errorText = await strapiResponse.text();
+        console.error('Strapi error response:', errorText);
         throw new Error('Strapi API error: ' + errorText);
       }
 
-      alert(`✅ Article about "${keyword}" generated and saved as draft.`);
+      alert(`✅ Article about the topic from "${selectedTitle}" generated and saved as draft.`);
 
       await fetchArticles();
     } catch (err) {
@@ -228,7 +269,13 @@ const Home = () => {
 
   return (
     <div style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
-      <h1>📰 Tech Blog</h1>
+      <h1>📰 Tech Blog (YouTube Powered)</h1>
+
+      <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+        <p style={{ margin: 0, fontSize: '14px', color: '#666' }}>
+          📺 Trending Video Titles Found: {trendingVideoTitles.length}
+        </p>
+      </div>
 
       <button 
         onClick={generateArticle} 
@@ -243,7 +290,7 @@ const Home = () => {
           cursor: 'pointer'
         }}
       >
-        {loading ? 'Generating...' : 'Generate Article'}
+        {loading ? 'Generating...' : 'Generate Article from YouTube Trend'}
       </button>
 
       {articles.length === 0 && <p>No published articles yet.</p>}
