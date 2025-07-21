@@ -18,8 +18,8 @@ const Home = () => {
   useEffect(() => {
     if (trendingVideoTitles.length === 0) return;
 
-    const targetHour = 8;
-    const targetMinute = 15;
+    const targetHour = 10;
+    const targetMinute = 10;
 
     const now = new Date();
     const target = new Date();
