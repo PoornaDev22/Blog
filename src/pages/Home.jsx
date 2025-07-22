@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import ArticleCard from '../components/ArticleCard';
 import ArticleTile from '../components/ArticleTile';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
-const YOUTUBE_API_KEY = 'AIzaSyB446LgUJAv_8VaFKUIscb2EpBjgEReJJw'; // Replace with your YouTube Data API v3 key
-const PEXELS_API_KEY = 'sjOBHQHFtx1czvi82hPpWGP0dpuneZTGmrx8kK7G7adkLxvRZDtqzzVT';
-const GEMINI_API_KEY = 'AIzaSyAjyLZntUCRikGurUQVM6ZmSxeyPuZZdl0';
+// Configuration - only Strapi URL needed on frontend
+const API_CONFIG = {
+  STRAPI_BASE_URL: 'https://effortless-connection-2f75f4ee80.strapiapp.com'
+};
 
 // Define categories with their search queries
 const CATEGORIES = {
@@ -28,192 +29,70 @@ const CATEGORIES = {
   }
 };
 
-const Home = () => {
-  const [articles, setArticles] = useState([]);
-  const [filteredArticles, setFilteredArticles] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [trendingVideosByCategory, setTrendingVideosByCategory] = useState({});
-  const [generatingCategory, setGeneratingCategory] = useState(null);
-  const [usedVideoTitles, setUsedVideoTitles] = useState(new Set());
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const navigate = useNavigate();
-  const { slug } = useParams();
-  const location = useLocation();
+// Custom hook for API calls with caching
+const useApiWithCache = () => {
+  const cache = useMemo(() => new Map(), []);
+  
+  const cachedFetch = useCallback(async (url, options = {}) => {
+    const cacheKey = `${url}${JSON.stringify(options)}`;
 
-  useEffect(() => {
-    fetchArticles();
-    fetchAllTrendingVideos();
-  }, []);
-
-  // Load used video titles when articles are fetched
-  useEffect(() => {
-    if (articles.length > 0) {
-      const titlesSet = new Set();
-      articles.forEach(article => {
-        const attrs = article.attributes || article;
-        if (attrs.keyword) {
-          titlesSet.add(attrs.keyword.toLowerCase().trim());
+    console.log(`[API] Making request to: ${url}`); // Debug: API endpoint
+    console.log(`[API] Request options:`, options); // Debug: Request options
+    
+    if (cache.has(cacheKey)) {
+      return cache.get(cacheKey);
+    }
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
         }
       });
-      setUsedVideoTitles(titlesSet);
-      console.log('Loaded used video titles:', Array.from(titlesSet));
-    }
-  }, [articles]);
 
-  // Filter articles based on selected category
-  useEffect(() => {
-    if (selectedCategory === 'all') {
-      setFilteredArticles(articles);
-    } else {
-      const categoryName = CATEGORIES[selectedCategory]?.name;
-      const filtered = articles.filter(article => {
-        const attrs = article.attributes || article;
-        return attrs.category === categoryName;
-      });
-      setFilteredArticles(filtered);
-    }
-  }, [articles, selectedCategory]);
-
-  useEffect(() => {
-    if (Object.keys(trendingVideosByCategory).length === 0) return;
-
-    const targetHour = 10;
-    const targetMinute = 10;
-
-    const now = new Date();
-    const target = new Date();
-
-    target.setHours(targetHour);
-    target.setMinutes(targetMinute);
-    target.setSeconds(0);
-    target.setMilliseconds(0);
-
-    const timeUntilTarget = target - now;
-
-    if (timeUntilTarget > 0) {
-      console.log(`⏳ Scheduled article generation in ${Math.round(timeUntilTarget / 1000)} seconds`);
-      const timer = setTimeout(() => {
-        console.log('🚀 Generating articles at scheduled time...');
-        generateAllCategoryArticles();
-      }, timeUntilTarget);
-
-      return () => clearTimeout(timer);
-    } else {
-      console.log('🕓 Target time already passed for today. Skipping auto-generation.');
-    }
-  }, [trendingVideosByCategory]);
-
-  // Console log trending stats instead of displaying
-  useEffect(() => {
-    if (!trendingVideosByCategory.tech && !trendingVideosByCategory.sports && !trendingVideosByCategory.politics) return;
-    const techTotal = trendingVideosByCategory.tech?.length || 0;
-    const sportsTotal = trendingVideosByCategory.sports?.length || 0;
-    const politicsTotal = trendingVideosByCategory.politics?.length || 0;
-    const techUnused = techTotal - (techTotal - getAvailableTitlesCount('tech'));
-    const sportsUnused = sportsTotal - (sportsTotal - getAvailableTitlesCount('sports'));
-    const politicsUnused = politicsTotal - (politicsTotal - getAvailableTitlesCount('politics'));
-    const used = usedVideoTitles.size;
-    console.log('Trending Videos by Category:');
-    console.log(`Technology: ${techTotal} total titles, ${getAvailableTitlesCount('tech')} unused`);
-    console.log(`Sports: ${sportsTotal} total titles, ${getAvailableTitlesCount('sports')} unused`);
-    console.log(`Politics: ${politicsTotal} total titles, ${getAvailableTitlesCount('politics')} unused`);
-    console.log(`📊 Usage Statistics: ${used} video titles have been used for articles`);
-  }, [trendingVideosByCategory, usedVideoTitles]);
-
-  async function fetchArticles() {
-    try {
-      const res = await fetch(
-        'https://effortless-connection-2f75f4ee80.strapiapp.com/api/articles?filters[pubstatus][$eq]=published&populate=*'
-      );
-      const data = await res.json();
-      setArticles(data.data);
-    } catch (err) {
-      console.error('Failed to fetch articles:', err);
-    }
-  }
-
-  async function fetchTrendingVideosForCategory(categoryKey, category) {
-    try {
-      console.log(`Fetching ${category.name} videos...`);
+      console.log(`[API] Response status: ${response.status}`); // Debug: Response status
       
-      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(category.searchQuery)}&type=video&order=relevance&publishedAfter=${getYesterdayISO()}&maxResults=15&key=${YOUTUBE_API_KEY}`;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
       
-      const res = await fetch(searchUrl);
-      const data = await res.json();
+      const data = await response.json();
+      console.log(`[API] Response data:`, data); // Debug: Response data
 
-      if (!data.items) throw new Error(`No ${category.name} videos returned from YouTube API`);
-
-      // Extract video titles
-      const videoTitles = data.items.map(item => item.snippet.title);
+      cache.set(cacheKey, data);
       
-      // Filter out titles that are too short or generic
-      const filteredTitles = videoTitles.filter(title => 
-        title.length > 20 && 
-        !title.toLowerCase().includes('shorts') &&
-        !title.toLowerCase().includes('live stream') &&
-        !title.toLowerCase().includes('livestream')
-      );
-
-      console.log(`✅ Fetched ${filteredTitles.length} ${category.name} video titles`);
-      return filteredTitles;
-    } catch (err) {
-      console.error(`Failed to fetch YouTube trending videos for ${category.name}:`, err);
+      // Clear cache after 5 minutes
+      setTimeout(() => cache.delete(cacheKey), 5 * 60 * 1000);
       
-      // Fallback titles for each category
-      const fallbackTitles = {
-        tech: [
-          'Revolutionary AI Breakthrough Changes Everything',
-          'The Future of Quantum Computing Explained',
-          'Why Cybersecurity Matters More Than Ever'
-        ],
-        sports: [
-          'Championship Game Highlights and Analysis',
-          'Olympic Records Broken This Season',
-          'Sports Technology Revolution in Training'
-        ],
-        politics: [
-          'Government Policy Changes Explained',
-          'International Relations Update',
-          'Election Analysis and Predictions'
-        ]
-      };
-
-      return fallbackTitles[categoryKey] || [];
+      return data;
+    } catch (error) {
+      console.error('API call failed:', error);
+      throw error;
     }
-  }
+  }, [cache]);
+  
+  return cachedFetch;
+};
 
-  async function fetchAllTrendingVideos() {
-    const videosByCategory = {};
-    
-    for (const [categoryKey, category] of Object.entries(CATEGORIES)) {
-      const videos = await fetchTrendingVideosForCategory(categoryKey, category);
-      videosByCategory[categoryKey] = videos;
-      
-      // Add small delay between API calls to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    setTrendingVideosByCategory(videosByCategory);
-    console.log('All trending videos fetched:', videosByCategory);
-  }
-
-  // Helper function to get yesterday's date in ISO format for YouTube API
-  function getYesterdayISO() {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return yesterday.toISOString();
-  }
-
-  function generateSlug(title) {
+// Custom hook for article generation
+const useArticleGeneration = () => {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingCategory, setGeneratingCategory] = useState(null);
+  const cachedFetch = useApiWithCache();
+  
+  const generateSlug = useCallback((title) => {
     return title
       .toLowerCase()
       .trim()
       .replace(/[^\w\s-]/g, '')
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-');
-  }
-
-  function parseTitleAndContentBlocks(markdown) {
+  }, []);
+  
+  const parseTitleAndContentBlocks = useCallback((markdown) => {
     const lines = markdown.split('\n');
     let title = 'Untitled Article';
     const blocks = [];
@@ -249,182 +128,285 @@ const Home = () => {
     }
 
     return { title, blocks };
-  }
-
-  const fetchPexelsImage = async (keyword) => {
+  }, []);
+  
+  // Call Strapi API endpoint for Pexels image search
+  const fetchPexelsImage = useCallback(async (keyword) => {
+    console.log(`[Pexels] Fetching image for keyword: ${keyword}`); // Debug: Keyword
     try {
-      const response = await fetch(
-        `https://api.pexels.com/v1/search?query=${encodeURIComponent(keyword)}&per_page=1`,
+      const data = await cachedFetch(
+        `${API_CONFIG.STRAPI_BASE_URL}/api/fetch-pexels-image`,
         {
-          headers: {
-            Authorization: PEXELS_API_KEY
-          }
+          method: 'POST',
+          body: JSON.stringify({ keyword })
         }
       );
+
+      console.log(`[Pexels] Received image URL: ${data.imageUrl || 'default'}`); // Debug: Image URL
       
-      const data = await response.json();
-      if (data.photos && data.photos.length > 0) {
-        return data.photos[0].src.medium;
-      }
-      return null;
+      return data.imageUrl || null;
     } catch (error) {
-      console.error('Error fetching image from Pexels:', error);
+      console.error('Error fetching image from Pexels via Strapi:', error);
       return null;
     }
-  };
+  }, [cachedFetch]);
+  
+  // Call Strapi API endpoint for Gemini article generation
+  const generateArticleContent = useCallback(async (title, categoryInfo) => {
+    console.log(`[Gemini] Generating content for title: ${title}`); // Debug: Title
+    console.log(`[Gemini] Category: ${categoryInfo.name}`); // Debug: Category
+    try {
+      const data = await cachedFetch(
+        `${API_CONFIG.STRAPI_BASE_URL}/api/generate-article`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ 
+            title, 
+            category: categoryInfo.name 
+          })
+        }
+      );
 
-  // Function to find an unused video title for a category
-  const findUnusedVideoTitle = (categoryVideos) => {
-    const availableTitles = categoryVideos.filter(title => 
-      !usedVideoTitles.has(title.toLowerCase().trim())
-    );
-    
-    if (availableTitles.length === 0) {
-      console.log('⚠️ No unused video titles available');
-      return null;
+      console.log(`[Gemini] Content length: ${data.content?.length || 0} chars`); // Debug: Content length
+
+      return data.content;
+    } catch (error) {
+      console.error('Error generating article content via Strapi:', error);
+      throw error;
     }
-    
-    return availableTitles[Math.floor(Math.random() * availableTitles.length)];
-  };
-
-  const generateArticleForCategory = async (categoryKey) => {
-    const categoryVideos = trendingVideosByCategory[categoryKey];
+  }, [cachedFetch]);
+  
+  const saveArticleToStrapi = useCallback(async (articleData) => {
+    try {
+      const response = await fetch(`${API_CONFIG.STRAPI_BASE_URL}/api/articles`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ data: articleData }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Strapi API error: ${response.status} - ${errorText}`);
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('Error saving article to Strapi:', error);
+      throw error;
+    }
+  }, []);
+  
+  const generateArticleForCategory = useCallback(async (categoryKey, availableTitle, usedTitles) => {
     const categoryInfo = CATEGORIES[categoryKey];
     
-    if (!categoryVideos || categoryVideos.length === 0) {
-      alert(`No trending video titles available for ${categoryInfo.name}`);
-      return false;
+    if (!availableTitle) {
+      throw new Error(`No unused video titles available for ${categoryInfo.name}`);
     }
-
-    // Find an unused video title
-    const selectedTitle = findUnusedVideoTitle(categoryVideos);
     
-    if (!selectedTitle) {
-      alert(`No unused video titles available for ${categoryInfo.name}. All titles have been used for articles already.`);
-      return false;
-    }
-
     setGeneratingCategory(categoryKey);
     
     try {
-      console.log(`Selected ${categoryInfo.name} video title:`, selectedTitle);
-
-      // Extract key terms from the video title for image search
-      const imageKeywords = selectedTitle
+      // Extract keywords for image search
+      const imageKeywords = availableTitle
         .replace(/[^\w\s]/g, '')
         .split(' ')
         .filter(word => word.length > 3)
         .slice(0, 3)
         .join(' ') || categoryKey;
 
-      // Fetch image from Pexels using extracted keywords
-      const imageUrl = await fetchPexelsImage(imageKeywords) || 
-        'https://images.pexels.com/photos/546819/pexels-photo-546819.jpeg'; // Fallback image
+      const [articleMarkdown, imageUrl] = await Promise.all([
+        generateArticleContent(availableTitle, categoryInfo),
+        fetchPexelsImage(imageKeywords)
+      ]);
 
-      console.log(`🎯 Sending this ${categoryInfo.name} video title to Gemini for analysis:`, selectedTitle);
-
-      // Generate article content with Gemini based on the full video title
-      const geminiResponse = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `Analyze this ${categoryInfo.name.toLowerCase()} video title: "${selectedTitle}". 
-
-Identify what specific topic within ${categoryInfo.name.toLowerCase()} this title is about, then write a comprehensive blog article about that subject. Do NOT mention the video or that this is based on a video title. Write as if you're an expert explaining the topic directly.
-
-For ${categoryInfo.name.toLowerCase()} category, make sure to:
-- Focus on the specific ${categoryInfo.name.toLowerCase()} aspect mentioned in the title
-- Provide in-depth analysis and insights
-- Use current and relevant examples
-- Make it engaging for readers interested in ${categoryInfo.name.toLowerCase()}
-
-Create the article in markdown format with headings, paragraphs, and lists. Make it informative, engaging, and well-structured.`,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
-
-      if (!geminiResponse.ok) {
-        const errorText = await geminiResponse.text();
-        throw new Error('Gemini API error: ' + errorText);
+      if (!articleMarkdown) {
+        throw new Error('No content returned from AI generator');
       }
-
-      const geminiData = await geminiResponse.json();
-      const articleMarkdown = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!articleMarkdown) throw new Error('No content returned from Gemini.');
 
       const { title, blocks } = parseTitleAndContentBlocks(articleMarkdown);
       const slug = generateSlug(title);
 
-      const newArticle = {
-        data: {
-          title,
-          content: blocks,
-          keyword: selectedTitle, // Save the full video title as the keyword
-          pubstatus: 'draft',
-          slug,
-          imageUrl,
-          category: categoryInfo.name
-        },
+      const articleData = {
+        title,
+        content: blocks,
+        keyword: availableTitle,
+        pubstatus: 'draft',
+        slug,
+        imageUrl: imageUrl || 'https://images.pexels.com/photos/546819/pexels-photo-546819.jpeg',
+        category: categoryInfo.name
       };
 
-      console.log(`Sending ${categoryInfo.name} article data to Strapi:`, JSON.stringify(newArticle, null, 2));
-
-      const strapiResponse = await fetch('https://effortless-connection-2f75f4ee80.strapiapp.com/api/articles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newArticle),
-      });
-
-      if (!strapiResponse.ok) {
-        const errorText = await strapiResponse.text();
-        console.error('Strapi error response:', errorText);
-        throw new Error('Strapi API error: ' + errorText);
-      }
-
-      // Add the used title to our tracking set
-      setUsedVideoTitles(prev => new Set([...prev, selectedTitle.toLowerCase().trim()]));
+      await saveArticleToStrapi(articleData);
       
-      console.log(`✅ ${categoryInfo.name} article generated successfully`);
-      console.log(`📝 Video title saved as keyword: ${selectedTitle}`);
-      
-      return true;
-    } catch (err) {
-      console.error(`Error generating ${categoryInfo.name} article:`, err.message);
-      throw err;
+      return availableTitle;
     } finally {
       setGeneratingCategory(null);
     }
+  }, [generateArticleContent, fetchPexelsImage, parseTitleAndContentBlocks, generateSlug, saveArticleToStrapi]);
+  
+  return {
+    isGenerating,
+    generatingCategory,
+    setIsGenerating,
+    generateArticleForCategory
   };
+};
 
-  const generateAllCategoryArticles = async () => {
-    setLoading(true);
+const Home = () => {
+  const [articles, setArticles] = useState([]);
+  const [filteredArticles, setFilteredArticles] = useState([]);
+  const [trendingVideosByCategory, setTrendingVideosByCategory] = useState({});
+  const [usedVideoTitles, setUsedVideoTitles] = useState(new Set());
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  
+  const navigate = useNavigate();
+  const { slug } = useParams();
+  const cachedFetch = useApiWithCache();
+  const {
+    isGenerating,
+    generatingCategory, 
+    setIsGenerating,
+    generateArticleForCategory
+  } = useArticleGeneration();
+
+  // Memoized filtered articles
+  const memoizedFilteredArticles = useMemo(() => {
+    if (selectedCategory === 'all') {
+      return articles;
+    }
+    
+    const categoryName = CATEGORIES[selectedCategory]?.name;
+    return articles.filter(article => {
+      const attrs = article.attributes || article;
+      return attrs.category === categoryName;
+    });
+  }, [articles, selectedCategory]);
+
+  // Update filtered articles when memoized value changes
+  useEffect(() => {
+    setFilteredArticles(memoizedFilteredArticles);
+  }, [memoizedFilteredArticles]);
+
+  // Load used video titles when articles are fetched
+  useEffect(() => {
+    if (articles.length > 0) {
+      const titlesSet = new Set();
+      articles.forEach(article => {
+        const attrs = article.attributes || article;
+        if (attrs.keyword) {
+          titlesSet.add(attrs.keyword.toLowerCase().trim());
+        }
+      });
+      setUsedVideoTitles(titlesSet);
+    }
+  }, [articles]);
+
+  const fetchArticles = useCallback(async () => {
+    try {
+      const data = await cachedFetch(
+        `${API_CONFIG.STRAPI_BASE_URL}/api/articles?filters[pubstatus][$eq]=published&populate=*`
+      );
+      setArticles(data.data || []);
+    } catch (err) {
+      console.error('Failed to fetch articles:', err);
+    }
+  }, [cachedFetch]);
+
+  // Call Strapi API endpoint for YouTube trending videos
+  const fetchTrendingVideosForCategory = useCallback(async (categoryKey, category) => {
+    console.log(`[YouTube] Fetching videos for ${category.name}`); // Debug: Category
+    console.log(`[YouTube] Search query: ${category.searchQuery}`); // Debug: Query
+    try {
+      const data = await cachedFetch(
+        `${API_CONFIG.STRAPI_BASE_URL}/api/fetch-youtube-videos`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            categoryKey,
+            searchQuery: category.searchQuery,
+            categoryName: category.name
+          })
+        }
+      );
+
+      console.log(`[YouTube] Received ${data.videoTitles?.length || 0} titles`); // Debug: Titles count
+
+      return data.videoTitles || [];
+    } catch (err) {
+      console.error(`Failed to fetch YouTube trending videos for ${category.name}:`, err);
+      
+      // Fallback titles
+      const fallbackTitles = {
+        tech: ['Revolutionary AI Breakthrough Changes Everything', 'The Future of Quantum Computing Explained'],
+        sports: ['Championship Game Highlights and Analysis', 'Olympic Records Broken This Season'],
+        politics: ['Government Policy Changes Explained', 'International Relations Update']
+      };
+
+      return fallbackTitles[categoryKey] || [];
+    }
+  }, [cachedFetch]);
+
+  const fetchAllTrendingVideos = useCallback(async () => {
+    const videosByCategory = {};
+    const promises = Object.entries(CATEGORIES).map(async ([categoryKey, category]) => {
+      const videos = await fetchTrendingVideosForCategory(categoryKey, category);
+      videosByCategory[categoryKey] = videos;
+      return Promise.resolve();
+    });
+    
+    await Promise.all(promises);
+    setTrendingVideosByCategory(videosByCategory);
+  }, [fetchTrendingVideosForCategory]);
+
+  // Helper function to get available titles count
+  const getAvailableTitlesCount = useCallback((categoryKey) => {
+    const categoryVideos = trendingVideosByCategory[categoryKey];
+    if (!categoryVideos) return 0;
+    
+    return categoryVideos.filter(title => 
+      !usedVideoTitles.has(title.toLowerCase().trim())
+    ).length;
+  }, [trendingVideosByCategory, usedVideoTitles]);
+
+  // Find unused video title
+  const findUnusedVideoTitle = useCallback((categoryVideos) => {
+    const availableTitles = categoryVideos.filter(title => 
+      !usedVideoTitles.has(title.toLowerCase().trim())
+    );
+    
+    return availableTitles.length > 0 
+      ? availableTitles[Math.floor(Math.random() * availableTitles.length)]
+      : null;
+  }, [usedVideoTitles]);
+
+  const generateAllCategoryArticles = useCallback(async () => {
+    setIsGenerating(true);
     let successCount = 0;
     let errors = [];
 
     for (const categoryKey of Object.keys(CATEGORIES)) {
       try {
-        const success = await generateArticleForCategory(categoryKey);
-        if (success) successCount++;
+        const categoryVideos = trendingVideosByCategory[categoryKey];
+        const availableTitle = findUnusedVideoTitle(categoryVideos || []);
         
-        // Add delay between generations to avoid API rate limits
+        if (availableTitle) {
+          const usedTitle = await generateArticleForCategory(categoryKey, availableTitle, usedVideoTitles);
+          setUsedVideoTitles(prev => new Set([...prev, usedTitle.toLowerCase().trim()]));
+          successCount++;
+        } else {
+          errors.push(`${CATEGORIES[categoryKey].name}: No unused titles available`);
+        }
+        
+        // Add delay between generations to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (err) {
         errors.push(`${CATEGORIES[categoryKey].name}: ${err.message}`);
       }
     }
 
-    setLoading(false);
+    setIsGenerating(false);
 
     if (successCount > 0) {
       alert(`✅ Successfully generated ${successCount} articles!${errors.length > 0 ? '\n\nErrors:\n' + errors.join('\n') : ''}`);
@@ -432,58 +414,62 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
     } else {
       alert('❌ Failed to generate any articles:\n' + errors.join('\n'));
     }
-  };
+  }, [trendingVideosByCategory, findUnusedVideoTitle, generateArticleForCategory, usedVideoTitles, fetchArticles]);
 
-  const generateSingleCategoryArticle = async (categoryKey) => {
-    setLoading(true);
-    try {
-      const success = await generateArticleForCategory(categoryKey);
-      if (success) {
-        alert(`✅ ${CATEGORIES[categoryKey].name} article generated successfully!`);
-        await fetchArticles();
-      }
-    } catch (err) {
-      alert(`❌ Error generating ${CATEGORIES[categoryKey].name} article: ${err.message}`);
-    }
-    setLoading(false);
-  };
-
-  // Helper function to get available titles count for each category
-  const getAvailableTitlesCount = (categoryKey) => {
-    const categoryVideos = trendingVideosByCategory[categoryKey];
-    if (!categoryVideos) return 0;
-    
-    return categoryVideos.filter(title => 
-      !usedVideoTitles.has(title.toLowerCase().trim())
-    ).length;
-  };
-
-  const handleCategoryChange = (category) => {
+  const handleCategoryChange = useCallback((category) => {
     setSelectedCategory(category);
-    // setSelectedArticle(null); // Clear selected article when changing category
-  };
+  }, []);
 
-  // When a tile is clicked, navigate to /article/:slug
-  const handleTileClick = (article) => {
+  const handleTileClick = useCallback((article) => {
     if (article.slug) {
       navigate(`/article/${article.slug}`);
     }
-  };
+  }, [navigate]);
 
-  // When back button is clicked, go back to the article list
-  const handleBackToTiles = () => {
+  const handleBackToTiles = useCallback(() => {
     navigate('/');
-  };
+  }, [navigate]);
 
-  // Find the selected article by slug if on /article/:slug
-  let selectedArticle = null;
-  if (slug && articles.length > 0) {
-    selectedArticle = articles
+  // Initial data fetch
+  useEffect(() => {
+    fetchArticles();
+    fetchAllTrendingVideos();
+  }, [fetchArticles, fetchAllTrendingVideos]);
+
+  // Auto-generation scheduler
+  useEffect(() => {
+    if (Object.keys(trendingVideosByCategory).length === 0) return;
+
+    const targetHour = 10;
+    const targetMinute = 10;
+    const now = new Date();
+    const target = new Date();
+
+    target.setHours(targetHour, targetMinute, 0, 0);
+    let timeUntilTarget = target - now;
+    
+    // If target time has passed today, schedule for tomorrow
+    if (timeUntilTarget <= 0) {
+      target.setDate(target.getDate() + 1);
+      timeUntilTarget = target - now;
+    }
+
+    if (timeUntilTarget > 0) {
+      const timer = setTimeout(generateAllCategoryArticles, timeUntilTarget);
+      return () => clearTimeout(timer);
+    }
+  }, [trendingVideosByCategory, generateAllCategoryArticles]);
+
+  // Find selected article by slug
+  const selectedArticle = useMemo(() => {
+    if (!slug || articles.length === 0) return null;
+    
+    return articles
       .map(a => a.attributes || a)
       .find(a => a.slug === slug);
-  }
+  }, [slug, articles]);
 
-  // If an article is selected, show the full article
+  // Render selected article view
   if (selectedArticle) {
     return (
       <div>
@@ -514,6 +500,7 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
     );
   }
 
+  // Main articles list view
   return (
     <div>
       <Navbar 
@@ -523,29 +510,49 @@ Create the article in markdown format with headings, paragraphs, and lists. Make
       />
       
       <div style={{ padding: '2rem', maxWidth: '1200px', margin: 'auto' }}>
-
-        {/* Only keep the Generate All button */}
         <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           <button 
             onClick={generateAllCategoryArticles} 
-            disabled={loading} 
+            disabled={isGenerating} 
             style={{ 
               padding: '0.75rem 1rem',
-              backgroundColor: loading ? '#28a74599' : '#28a745',
+              backgroundColor: isGenerating ? '#28a74599' : '#28a745',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
-              cursor: loading ? 'not-allowed' : 'pointer',
+              cursor: isGenerating ? 'not-allowed' : 'pointer',
               fontWeight: 'bold',
               flex: '1',
               minWidth: '200px'
             }}
           >
-            {loading ? 'Generating All Articles...' : '🚀 Generate All 3 Category Articles'}
+            {isGenerating ? 'Generating All Articles...' : '🚀 Generate All 3 Category Articles'}
           </button>
         </div>
 
-        {/* Restore article tiles grid and no articles message */}
+        {/* Show generation status for each category */}
+        {isGenerating && (
+          <div style={{ 
+            marginBottom: '1rem', 
+            padding: '1rem', 
+            backgroundColor: '#f8f9fa', 
+            borderRadius: '6px' 
+          }}>
+            <h4>Generation Status:</h4>
+            {Object.keys(CATEGORIES).map(categoryKey => (
+              <div key={categoryKey} style={{ 
+                marginBottom: '0.5rem',
+                color: generatingCategory === categoryKey ? '#007bff' : '#666'
+              }}>
+                {CATEGORIES[categoryKey].name}: {
+                  generatingCategory === categoryKey ? '⏳ Generating...' : 
+                  '⏸️ Waiting...'
+                }
+              </div>
+            ))}
+          </div>
+        )}
+
         {filteredArticles.length === 0 && (
           <p style={{ textAlign: 'center', color: '#666', fontSize: '18px' }}>
             No articles available in this category yet.
