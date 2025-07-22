@@ -83,32 +83,52 @@ const useArticleGeneration = () => {
   const [generatingCategory, setGeneratingCategory] = useState(null);
   const cachedFetch = useApiWithCache();
   
-  const generateSlug = useCallback((title) => {
-    return title
+  const generateSlug = useCallback((title, availableTitle) => {
+    let baseSlug = title
       .toLowerCase()
       .trim()
       .replace(/[^\w\s-]/g, '')
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-');
+
+    if (!baseSlug || baseSlug === 'untitled-article') {
+      baseSlug = availableTitle
+        .toLowerCase()
+        .trim()
+        .replace(/[^\w\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-');
+    }
+
+    const timestamp = Date.now();
+    console.log('[DEBUG] Generated slug:', `${baseSlug}-${timestamp}`);
+    return `${baseSlug}-${timestamp}`;
   }, []);
   
-  const parseTitleAndContentBlocks = useCallback((markdown) => {
+  const parseTitleAndContentBlocks = useCallback((markdown, availableTitle) => {
+    console.log('[DEBUG] Parsing markdown:', markdown.slice(0, 200) + '...');
     const lines = markdown.split('\n');
-    let title = 'Untitled Article';
+    let title = availableTitle || 'Untitled Article'; // Default to availableTitle, fallback to 'Untitled Article'
     const blocks = [];
 
+    let titleFound = false;
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      if (trimmed.startsWith('# ')) {
+      if (!titleFound && trimmed.startsWith('# ')) {
         title = trimmed.replace('# ', '');
+        titleFound = true;
         blocks.push({
           type: 'heading',
           level: 1,
           children: [{ type: 'text', text: title }],
         });
       } else if (trimmed.startsWith('## ')) {
+        if (!titleFound) {
+          title = availableTitle || trimmed.replace('## ', ''); // Use availableTitle if no # heading
+          titleFound = true;
+        }
         blocks.push({
           type: 'heading',
           level: 2,
@@ -127,6 +147,7 @@ const useArticleGeneration = () => {
       }
     }
 
+    console.log('[DEBUG] Parsed title:', title);
     return { title, blocks };
   }, []);
   
@@ -225,8 +246,8 @@ const useArticleGeneration = () => {
         throw new Error('No content returned from AI generator');
       }
 
-      const { title, blocks } = parseTitleAndContentBlocks(articleMarkdown);
-      const slug = generateSlug(title);
+      const { title, blocks } = parseTitleAndContentBlocks(articleMarkdown, availableTitle);
+      const slug = generateSlug(title, availableTitle);
 
       const articleData = {
         title,
