@@ -217,17 +217,17 @@ const useArticleGeneration = () => {
     }
   }, []);
   
-  const generateArticleForCategory = useCallback(async (categoryKey, availableTitle, usedTitles) => {
+  const generateArticleForCategory = useCallback(async (categoryKey, availableKeyword, usedKeywords) => {
     const categoryInfo = CATEGORIES[categoryKey];
     
-    if (!availableTitle) {
-      throw new Error(`No unused video titles available for ${categoryInfo.name}`);
+    if (!availableKeyword) {
+      throw new Error(`No unused keywords available for ${categoryInfo.name}`);
     }
     
     setGeneratingCategory(categoryKey);
     
     try {
-      const imageKeywords = availableTitle
+      const imageKeywords = availableKeyword
         .replace(/[^\w\s]/g, '')
         .split(' ')
         .filter(word => word.length > 3)
@@ -235,7 +235,7 @@ const useArticleGeneration = () => {
         .join(' ') || categoryKey;
 
       const [articleMarkdown, imageUrl] = await Promise.all([
-        generateArticleContent(availableTitle, categoryInfo),
+        generateArticleContent(availableKeyword, categoryInfo),
         fetchPexelsImage(imageKeywords)
       ]);
 
@@ -243,13 +243,13 @@ const useArticleGeneration = () => {
         throw new Error('No content returned from AI generator');
       }
 
-      const { title, blocks } = parseTitleAndContentBlocks(articleMarkdown, availableTitle);
-      const slug = generateSlug(title, availableTitle);
+      const { title, blocks } = parseTitleAndContentBlocks(articleMarkdown, availableKeyword);
+      const slug = generateSlug(title, availableKeyword);
 
       const articleData = {
         title,
         content: blocks,
-        keyword: availableTitle,
+        keyword: availableKeyword,
         pubstatus: 'draft',
         slug,
         imageUrl: imageUrl || 'https://images.pexels.com/photos/546819/pexels-photo-546819.jpeg',
@@ -258,7 +258,7 @@ const useArticleGeneration = () => {
 
       await saveArticleToStrapi(articleData);
       
-      return availableTitle;
+      return availableKeyword;
     } finally {
       setGeneratingCategory(null);
     }
@@ -275,9 +275,9 @@ const useArticleGeneration = () => {
 const Home = () => {
   const [articles, setArticles] = useState([]);
   const [filteredArticles, setFilteredArticles] = useState([]);
-  const [usedVideoTitles, setUsedVideoTitles] = useState(new Set());
+  const [usedKeywords, setUsedKeywords] = useState(new Set());
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [isFetchingVideos, setIsFetchingVideos] = useState(false);
+  const [isFetchingKeywords, setIsFetchingKeywords] = useState(false);
   
   const navigate = useNavigate();
   const { slug } = useParams();
@@ -307,14 +307,14 @@ const Home = () => {
 
   useEffect(() => {
     if (articles.length > 0) {
-      const titlesSet = new Set();
+      const keywordsSet = new Set();
       articles.forEach(article => {
         const attrs = article.attributes || article;
         if (attrs.keyword) {
-          titlesSet.add(attrs.keyword.toLowerCase().trim());
+          keywordsSet.add(attrs.keyword.toLowerCase().trim());
         }
       });
-      setUsedVideoTitles(titlesSet);
+      setUsedKeywords(keywordsSet);
     }
   }, [articles]);
 
@@ -329,6 +329,60 @@ const Home = () => {
     }
   }, [cachedFetch]);
 
+  // NEW: Fetch trending keywords from SerpAPI instead of YouTube videos
+  const fetchTrendingKeywordsForCategory = useCallback(async (categoryKey, category) => {
+    console.log(`[SerpAPI] Fetching trending keywords for ${category.name}`);
+    setIsFetchingKeywords(true);
+    try {
+      const data = await cachedFetch(
+        `${API_CONFIG.STRAPI_BASE_URL}/api/fetch-trending-keywords`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            categoryKey,
+            searchQuery: category.searchQuery,
+            categoryName: category.name
+          })
+        }
+      );
+
+      console.log(`[SerpAPI] Received ${data.keywords?.length || 0} keywords`);
+      return data.keywords || [];
+    } catch (err) {
+      console.error(`Failed to fetch trending keywords for ${category.name}:`, err);
+      
+      const fallbackKeywords = {
+        tech: [
+          'AI breakthrough 2025',
+          'Latest smartphone technology',
+          'Quantum computing advances',
+          'Cybersecurity trends',
+          'Cloud computing innovations'
+        ],
+        sports: [
+          'Championship playoffs 2025',
+          'Olympic training updates',
+          'Professional sports trades',
+          'Athletic performance technology',
+          'Sports injury prevention'
+        ],
+        politics: [
+          'Government policy changes',
+          'International diplomacy news',
+          'Election campaign updates',
+          'Legislative developments',
+          'Political analysis trends'
+        ]
+      };
+
+      return fallbackKeywords[categoryKey] || [];
+    } finally {
+      setIsFetchingKeywords(false);
+    }
+  }, [cachedFetch]);
+
+  // COMMENTED OUT: YouTube video fetching (keeping for potential future use)
+  /*
   const fetchTrendingVideosForCategory = useCallback(async (categoryKey, category) => {
     console.log(`[YouTube] Fetching videos for ${category.name}`);
     setIsFetchingVideos(true);
@@ -361,14 +415,15 @@ const Home = () => {
       setIsFetchingVideos(false);
     }
   }, [cachedFetch]);
+  */
 
-  const findUnusedVideoTitle = useCallback((categoryVideos, usedTitles) => {
-    const availableTitles = categoryVideos.filter(title => 
-      !usedTitles.has(title.toLowerCase().trim())
+  const findUnusedKeyword = useCallback((categoryKeywords, usedKeywords) => {
+    const availableKeywords = categoryKeywords.filter(keyword => 
+      !usedKeywords.has(keyword.toLowerCase().trim())
     );
     
-    return availableTitles.length > 0 
-      ? availableTitles[Math.floor(Math.random() * availableTitles.length)]
+    return availableKeywords.length > 0 
+      ? availableKeywords[Math.floor(Math.random() * availableKeywords.length)]
       : null;
   }, []);
 
@@ -379,27 +434,27 @@ const Home = () => {
 
     for (const categoryKey of Object.keys(CATEGORIES)) {
       try {
-        // Fetch videos for this category first
-        const categoryVideos = await fetchTrendingVideosForCategory(
+        // Fetch trending keywords for this category
+        const categoryKeywords = await fetchTrendingKeywordsForCategory(
           categoryKey, 
           CATEGORIES[categoryKey]
         );
         
-        const availableTitle = findUnusedVideoTitle(
-          categoryVideos, 
-          usedVideoTitles
+        const availableKeyword = findUnusedKeyword(
+          categoryKeywords, 
+          usedKeywords
         );
         
-        if (availableTitle) {
-          const usedTitle = await generateArticleForCategory(
+        if (availableKeyword) {
+          const usedKeyword = await generateArticleForCategory(
             categoryKey, 
-            availableTitle, 
-            usedVideoTitles
+            availableKeyword, 
+            usedKeywords
           );
-          setUsedVideoTitles(prev => new Set([...prev, usedTitle.toLowerCase().trim()]));
+          setUsedKeywords(prev => new Set([...prev, usedKeyword.toLowerCase().trim()]));
           successCount++;
         } else {
-          errors.push(`${CATEGORIES[categoryKey].name}: No unused titles available`);
+          errors.push(`${CATEGORIES[categoryKey].name}: No unused keywords available`);
         }
         
         // Add delay between generations to avoid rate limiting
@@ -417,7 +472,7 @@ const Home = () => {
     } else {
       alert('❌ Failed to generate any articles:\n' + errors.join('\n'));
     }
-  }, [fetchTrendingVideosForCategory, findUnusedVideoTitle, generateArticleForCategory, usedVideoTitles, fetchArticles]);
+  }, [fetchTrendingKeywordsForCategory, findUnusedKeyword, generateArticleForCategory, usedKeywords, fetchArticles]);
 
   const handleCategoryChange = useCallback((category) => {
     setSelectedCategory(category);
@@ -512,26 +567,26 @@ const Home = () => {
         <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           <button 
             onClick={generateAllCategoryArticles} 
-            disabled={isGenerating || isFetchingVideos} 
+            disabled={isGenerating || isFetchingKeywords} 
             style={{ 
               padding: '0.75rem 1rem',
-              backgroundColor: (isGenerating || isFetchingVideos) ? '#28a74599' : '#28a745',
+              backgroundColor: (isGenerating || isFetchingKeywords) ? '#28a74599' : '#28a745',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
-              cursor: (isGenerating || isFetchingVideos) ? 'not-allowed' : 'pointer',
+              cursor: (isGenerating || isFetchingKeywords) ? 'not-allowed' : 'pointer',
               fontWeight: 'bold',
               flex: '1',
               minWidth: '200px'
             }}
           >
-            {isFetchingVideos ? 'Fetching Video Titles...' : 
+            {isFetchingKeywords ? 'Fetching Trending Keywords...' : 
              isGenerating ? 'Generating Articles...' : 
              '🚀 Generate All 3 Category Articles'}
           </button>
         </div>
 
-        {(isGenerating || isFetchingVideos) && (
+        {(isGenerating || isFetchingKeywords) && (
           <div style={{ 
             marginBottom: '1rem', 
             padding: '1rem', 
@@ -545,7 +600,7 @@ const Home = () => {
                 color: generatingCategory === categoryKey ? '#007bff' : '#666'
               }}>
                 {CATEGORIES[categoryKey].name}: {
-                  isFetchingVideos ? '🔍 Fetching video titles...' :
+                  isFetchingKeywords ? '🔍 Fetching trending keywords...' :
                   generatingCategory === categoryKey ? '⏳ Generating article...' : 
                   '⏸️ Waiting...'
                 }
