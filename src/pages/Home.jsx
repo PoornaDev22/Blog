@@ -5,31 +5,10 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useNavigate, useParams } from 'react-router-dom';
 
-// Configuration - only Strapi URL needed on frontend
 const API_CONFIG = {
   STRAPI_BASE_URL: 'https://effortless-connection-2f75f4ee80.strapiapp.com'
 };
 
-// Define categories with their search queries
-const CATEGORIES = {
-  tech: {
-    name: 'Technology',
-    searchQuery: 'technology programming AI software development coding',
-    color: '#007bff'
-  },
-  sports: {
-    name: 'Sports',
-    searchQuery: 'sports football basketball soccer tennis olympics',
-    color: '#28a745'
-  },
-  politics: {
-    name: 'Politics',
-    searchQuery: 'politics government election policy international news',
-    color: '#dc3545'
-  }
-};
-
-// Custom hook for API calls with caching
 const useApiWithCache = () => {
   const cache = useMemo(() => new Map(), []);
   
@@ -63,8 +42,6 @@ const useApiWithCache = () => {
       console.log(`[API] Response data:`, data);
 
       cache.set(cacheKey, data);
-      
-      // Clear cache after 5 minutes
       setTimeout(() => cache.delete(cacheKey), 5 * 60 * 1000);
       
       return data;
@@ -77,10 +54,8 @@ const useApiWithCache = () => {
   return cachedFetch;
 };
 
-// Custom hook for article generation
 const useArticleGeneration = () => {
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatingCategory, setGeneratingCategory] = useState(null);
   const cachedFetch = useApiWithCache();
   
   const generateSlug = useCallback((title, availableTitle) => {
@@ -100,13 +75,10 @@ const useArticleGeneration = () => {
         .replace(/-+/g, '-');
     }
 
-    const timestamp = Date.now();
-    console.log('[DEBUG] Generated slug:', `${baseSlug}-${timestamp}`);
-    return `${baseSlug}-${timestamp}`;
+    return `${baseSlug}-${Date.now()}`;
   }, []);
   
   const parseTitleAndContentBlocks = useCallback((markdown, availableTitle) => {
-    console.log('[DEBUG] Parsing markdown:', markdown.slice(0, 200) + '...');
     const lines = markdown.split('\n');
     let title = availableTitle || 'Untitled Article';
     const blocks = [];
@@ -147,12 +119,10 @@ const useArticleGeneration = () => {
       }
     }
 
-    console.log('[DEBUG] Parsed title:', title);
     return { title, blocks };
   }, []);
   
   const fetchPexelsImage = useCallback(async (keyword) => {
-    console.log(`[Pexels] Fetching image for keyword: ${keyword}`);
     try {
       const data = await cachedFetch(
         `${API_CONFIG.STRAPI_BASE_URL}/api/fetch-pexels-image`,
@@ -161,36 +131,25 @@ const useArticleGeneration = () => {
           body: JSON.stringify({ keyword })
         }
       );
-
-      console.log(`[Pexels] Received image URL: ${data.imageUrl || 'default'}`);
-      
       return data.imageUrl || null;
     } catch (error) {
-      console.error('Error fetching image from Pexels via Strapi:', error);
+      console.error('Error fetching image from Pexels:', error);
       return null;
     }
   }, [cachedFetch]);
   
-  const generateArticleContent = useCallback(async (title, categoryInfo) => {
-    console.log(`[Gemini] Generating content for title: ${title}`);
-    console.log(`[Gemini] Category: ${categoryInfo.name}`);
+  const generateArticleContent = useCallback(async (title) => {
     try {
       const data = await cachedFetch(
         `${API_CONFIG.STRAPI_BASE_URL}/api/generate-article`,
         {
           method: 'POST',
-          body: JSON.stringify({ 
-            title, 
-            category: categoryInfo.name 
-          })
+          body: JSON.stringify({ title })
         }
       );
-
-      console.log(`[Gemini] Content length: ${data.content?.length || 0} chars`);
-
-      return data.content;
+      return { content: data.content, category: data.category };
     } catch (error) {
-      console.error('Error generating article content via Strapi:', error);
+      console.error('Error generating article content:', error);
       throw error;
     }
   }, [cachedFetch]);
@@ -217,66 +176,79 @@ const useArticleGeneration = () => {
     }
   }, []);
   
-  const generateArticleForCategory = useCallback(async (categoryKey, availableKeyword, usedKeywords) => {
-    const categoryInfo = CATEGORIES[categoryKey];
-    
-    if (!availableKeyword) {
-      throw new Error(`No unused keywords available for ${categoryInfo.name}`);
-    }
-    
-    setGeneratingCategory(categoryKey);
-    
-    try {
-      const imageKeywords = availableKeyword
-        .replace(/[^\w\s]/g, '')
-        .split(' ')
-        .filter(word => word.length > 3)
-        .slice(0, 3)
-        .join(' ') || categoryKey;
+  const generateArticles = useCallback(async (keywords, usedKeywords) => {
+    setIsGenerating(true);
+    let successCount = 0;
+    let errors = [];
 
-      const [articleMarkdown, imageUrl] = await Promise.all([
-        generateArticleContent(availableKeyword, categoryInfo),
-        fetchPexelsImage(imageKeywords)
-      ]);
+    const keywordsToProcess = keywords.slice(0, 15);
+    
+    for (const keyword of keywordsToProcess) {
+      try {
+        if (usedKeywords.has(keyword.toLowerCase().trim())) {
+          continue;
+        }
+        
+        const imageKeywords = keyword
+          .replace(/[^\w\s]/g, '')
+          .split(' ')
+          .filter(word => word.length > 3)
+          .slice(0, 3)
+          .join(' ');
 
-      if (!articleMarkdown) {
-        throw new Error('No content returned from AI generator');
+        const [articleResult, imageUrl] = await Promise.all([
+          generateArticleContent(keyword),
+          fetchPexelsImage(imageKeywords)
+        ]);
+
+        if (!articleResult.content) {
+          throw new Error('No content returned from AI generator');
+        }
+
+        const { title, blocks } = parseTitleAndContentBlocks(articleResult.content, keyword);
+        const slug = generateSlug(title, keyword);
+
+        const articleData = {
+          title,
+          content: blocks,
+          keyword,
+          category: articleResult.category, // Add the category here
+          pubstatus: 'draft',
+          slug,
+          imageUrl: imageUrl || 'https://images.pexels.com/photos/546819/pexels-photo-546819.jpeg'
+        };
+
+        await saveArticleToStrapi(articleData);
+        successCount++;
+        
+        if (successCount >= 10) break;
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (err) {
+        errors.push(`${keyword}: ${err.message}`);
       }
+    }
 
-      const { title, blocks } = parseTitleAndContentBlocks(articleMarkdown, availableKeyword);
-      const slug = generateSlug(title, availableKeyword);
+    setIsGenerating(false);
 
-      const articleData = {
-        title,
-        content: blocks,
-        keyword: availableKeyword,
-        pubstatus: 'draft',
-        slug,
-        imageUrl: imageUrl || 'https://images.pexels.com/photos/546819/pexels-photo-546819.jpeg',
-        category: categoryInfo.name
-      };
-
-      await saveArticleToStrapi(articleData);
-      
-      return availableKeyword;
-    } finally {
-      setGeneratingCategory(null);
+    if (successCount > 0) {
+      alert(`✅ Successfully generated ${successCount} articles!${errors.length > 0 ? '\n\nErrors:\n' + errors.join('\n') : ''}`);
+      return true;
+    } else {
+      alert('❌ Failed to generate any articles:\n' + errors.join('\n'));
+      return false;
     }
   }, [generateArticleContent, fetchPexelsImage, parseTitleAndContentBlocks, generateSlug, saveArticleToStrapi]);
   
   return {
     isGenerating,
-    generatingCategory,
-    setIsGenerating,
-    generateArticleForCategory
+    generateArticles
   };
 };
 
 const Home = () => {
   const [articles, setArticles] = useState([]);
-  const [filteredArticles, setFilteredArticles] = useState([]);
   const [usedKeywords, setUsedKeywords] = useState(new Set());
-  const [selectedCategory, setSelectedCategory] = useState('all');
   const [isFetchingKeywords, setIsFetchingKeywords] = useState(false);
   
   const navigate = useNavigate();
@@ -284,26 +256,8 @@ const Home = () => {
   const cachedFetch = useApiWithCache();
   const {
     isGenerating,
-    generatingCategory, 
-    setIsGenerating,
-    generateArticleForCategory
+    generateArticles
   } = useArticleGeneration();
-
-  const memoizedFilteredArticles = useMemo(() => {
-    if (selectedCategory === 'all') {
-      return articles;
-    }
-    
-    const categoryName = CATEGORIES[selectedCategory]?.name;
-    return articles.filter(article => {
-      const attrs = article.attributes || article;
-      return attrs.category === categoryName;
-    });
-  }, [articles, selectedCategory]);
-
-  useEffect(() => {
-    setFilteredArticles(memoizedFilteredArticles);
-  }, [memoizedFilteredArticles]);
 
   useEffect(() => {
     if (articles.length > 0) {
@@ -321,7 +275,7 @@ const Home = () => {
   const fetchArticles = useCallback(async () => {
     try {
       const data = await cachedFetch(
-        `${API_CONFIG.STRAPI_BASE_URL}/api/articles?filters[pubstatus][$eq]=published&populate=*`
+        `${API_CONFIG.STRAPI_BASE_URL}/api/articles?populate=*&filters[pubstatus][$eq]=published`
       );
       setArticles(data.data || []);
     } catch (err) {
@@ -329,154 +283,44 @@ const Home = () => {
     }
   }, [cachedFetch]);
 
-  // NEW: Fetch trending keywords from SerpAPI instead of YouTube videos
-  const fetchTrendingKeywordsForCategory = useCallback(async (categoryKey, category) => {
-    console.log(`[SerpAPI] Fetching trending keywords for ${category.name}`);
+  const fetchTrendingKeywords = useCallback(async () => {
+    console.log('[SerpAPI] Fetching trending keywords');
     setIsFetchingKeywords(true);
     try {
       const data = await cachedFetch(
-        `${API_CONFIG.STRAPI_BASE_URL}/api/fetch-trending-keywords`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            categoryKey,
-            searchQuery: category.searchQuery,
-            categoryName: category.name
-          })
-        }
+        `${API_CONFIG.STRAPI_BASE_URL}/api/fetch-trending-keywords`
       );
 
       console.log(`[SerpAPI] Received ${data.keywords?.length || 0} keywords`);
       return data.keywords || [];
     } catch (err) {
-      console.error(`Failed to fetch trending keywords for ${category.name}:`, err);
+      console.error('Failed to fetch trending keywords:', err);
       
-      const fallbackKeywords = {
-        tech: [
-          'AI breakthrough 2025',
-          'Latest smartphone technology',
-          'Quantum computing advances',
-          'Cybersecurity trends',
-          'Cloud computing innovations'
-        ],
-        sports: [
-          'Championship playoffs 2025',
-          'Olympic training updates',
-          'Professional sports trades',
-          'Athletic performance technology',
-          'Sports injury prevention'
-        ],
-        politics: [
-          'Government policy changes',
-          'International diplomacy news',
-          'Election campaign updates',
-          'Legislative developments',
-          'Political analysis trends'
-        ]
-      };
-
-      return fallbackKeywords[categoryKey] || [];
+      const fallbackKeywords = [
+        'AI breakthrough 2025',
+        'Latest smartphone technology',
+        'Government policy changes',
+        'Championship playoffs 2025',
+        'Home organization trends',
+        'New restaurant trends',
+        'Mental health awareness',
+        'Sustainable tourism',
+        'Investment strategies',
+        'Viral internet trends'
+      ];
+      return fallbackKeywords;
     } finally {
       setIsFetchingKeywords(false);
     }
   }, [cachedFetch]);
 
-  // COMMENTED OUT: YouTube video fetching (keeping for potential future use)
-  /*
-  const fetchTrendingVideosForCategory = useCallback(async (categoryKey, category) => {
-    console.log(`[YouTube] Fetching videos for ${category.name}`);
-    setIsFetchingVideos(true);
-    try {
-      const data = await cachedFetch(
-        `${API_CONFIG.STRAPI_BASE_URL}/api/fetch-youtube-videos`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            categoryKey,
-            searchQuery: category.searchQuery,
-            categoryName: category.name
-          })
-        }
-      );
-
-      console.log(`[YouTube] Received ${data.videoTitles?.length || 0} titles`);
-      return data.videoTitles || [];
-    } catch (err) {
-      console.error(`Failed to fetch YouTube trending videos for ${category.name}:`, err);
-      
-      const fallbackTitles = {
-        tech: ['Revolutionary AI Breakthrough Changes Everything', 'The Future of Quantum Computing Explained'],
-        sports: ['Championship Game Highlights and Analysis', 'Olympic Records Broken This Season'],
-        politics: ['Government Policy Changes Explained', 'International Relations Update']
-      };
-
-      return fallbackTitles[categoryKey] || [];
-    } finally {
-      setIsFetchingVideos(false);
-    }
-  }, [cachedFetch]);
-  */
-
-  const findUnusedKeyword = useCallback((categoryKeywords, usedKeywords) => {
-    const availableKeywords = categoryKeywords.filter(keyword => 
-      !usedKeywords.has(keyword.toLowerCase().trim())
-    );
-    
-    return availableKeywords.length > 0 
-      ? availableKeywords[Math.floor(Math.random() * availableKeywords.length)]
-      : null;
-  }, []);
-
-  const generateAllCategoryArticles = useCallback(async () => {
-    setIsGenerating(true);
-    let successCount = 0;
-    let errors = [];
-
-    for (const categoryKey of Object.keys(CATEGORIES)) {
-      try {
-        // Fetch trending keywords for this category
-        const categoryKeywords = await fetchTrendingKeywordsForCategory(
-          categoryKey, 
-          CATEGORIES[categoryKey]
-        );
-        
-        const availableKeyword = findUnusedKeyword(
-          categoryKeywords, 
-          usedKeywords
-        );
-        
-        if (availableKeyword) {
-          const usedKeyword = await generateArticleForCategory(
-            categoryKey, 
-            availableKeyword, 
-            usedKeywords
-          );
-          setUsedKeywords(prev => new Set([...prev, usedKeyword.toLowerCase().trim()]));
-          successCount++;
-        } else {
-          errors.push(`${CATEGORIES[categoryKey].name}: No unused keywords available`);
-        }
-        
-        // Add delay between generations to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (err) {
-        errors.push(`${CATEGORIES[categoryKey].name}: ${err.message}`);
-      }
-    }
-
-    setIsGenerating(false);
-
-    if (successCount > 0) {
-      alert(`✅ Successfully generated ${successCount} articles!${errors.length > 0 ? '\n\nErrors:\n' + errors.join('\n') : ''}`);
+  const generateNewArticles = useCallback(async () => {
+    const keywords = await fetchTrendingKeywords();
+    const success = await generateArticles(keywords, usedKeywords);
+    if (success) {
       await fetchArticles();
-    } else {
-      alert('❌ Failed to generate any articles:\n' + errors.join('\n'));
     }
-  }, [fetchTrendingKeywordsForCategory, findUnusedKeyword, generateArticleForCategory, usedKeywords, fetchArticles]);
-
-  const handleCategoryChange = useCallback((category) => {
-    setSelectedCategory(category);
-  }, []);
+  }, [fetchTrendingKeywords, generateArticles, usedKeywords, fetchArticles]);
 
   const handleTileClick = useCallback((article) => {
     if (article.slug) {
@@ -488,34 +332,9 @@ const Home = () => {
     navigate('/');
   }, [navigate]);
 
-  // Initial articles fetch only
   useEffect(() => {
     fetchArticles();
   }, [fetchArticles]);
-
-  // Scheduled generation
-  useEffect(() => {
-    const targetHour = 10;
-    const targetMinute = 10;
-    const now = new Date();
-    const target = new Date();
-
-    target.setHours(targetHour, targetMinute, 0, 0);
-    let timeUntilTarget = target - now;
-    
-    if (timeUntilTarget <= 0) {
-      target.setDate(target.getDate() + 1);
-      timeUntilTarget = target - now;
-    }
-
-    if (timeUntilTarget > 0) {
-      const timer = setTimeout(() => {
-        console.log('Running scheduled article generation');
-        generateAllCategoryArticles();
-      }, timeUntilTarget);
-      return () => clearTimeout(timer);
-    }
-  }, [generateAllCategoryArticles]);
 
   const selectedArticle = useMemo(() => {
     if (!slug || articles.length === 0) return null;
@@ -528,11 +347,7 @@ const Home = () => {
   if (selectedArticle) {
     return (
       <div>
-        <Navbar 
-          selectedCategory={selectedCategory} 
-          onCategoryChange={handleCategoryChange}
-          categories={CATEGORIES}
-        />
+        <Navbar />
         <div style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
           <button 
             onClick={handleBackToTiles}
@@ -557,16 +372,12 @@ const Home = () => {
 
   return (
     <div>
-      <Navbar 
-        selectedCategory={selectedCategory} 
-        onCategoryChange={handleCategoryChange}
-        categories={CATEGORIES}
-      />
+      <Navbar />
       
       <div style={{ padding: '2rem', maxWidth: '1200px', margin: 'auto' }}>
         <div style={{ marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           <button 
-            onClick={generateAllCategoryArticles} 
+            onClick={generateNewArticles} 
             disabled={isGenerating || isFetchingKeywords} 
             style={{ 
               padding: '0.75rem 1rem',
@@ -582,7 +393,7 @@ const Home = () => {
           >
             {isFetchingKeywords ? 'Fetching Trending Keywords...' : 
              isGenerating ? 'Generating Articles...' : 
-             '🚀 Generate All 3 Category Articles'}
+             '🚀 Generate New Articles'}
           </button>
         </div>
 
@@ -594,24 +405,17 @@ const Home = () => {
             borderRadius: '6px' 
           }}>
             <h4>Generation Status:</h4>
-            {Object.keys(CATEGORIES).map(categoryKey => (
-              <div key={categoryKey} style={{ 
-                marginBottom: '0.5rem',
-                color: generatingCategory === categoryKey ? '#007bff' : '#666'
-              }}>
-                {CATEGORIES[categoryKey].name}: {
-                  isFetchingKeywords ? '🔍 Fetching trending keywords...' :
-                  generatingCategory === categoryKey ? '⏳ Generating article...' : 
-                  '⏸️ Waiting...'
-                }
-              </div>
-            ))}
+            <div>
+              {isFetchingKeywords ? '🔍 Fetching trending keywords...' :
+               isGenerating ? '⏳ Generating articles...' : 
+               'Ready to generate'}
+            </div>
           </div>
         )}
 
-        {filteredArticles.length === 0 && (
+        {articles.length === 0 && (
           <p style={{ textAlign: 'center', color: '#666', fontSize: '18px' }}>
-            No articles available in this category yet.
+            No published articles available yet. Click "Generate New Articles" to get started.
           </p>
         )}
 
@@ -621,7 +425,7 @@ const Home = () => {
           gap: '1.5rem',
           marginBottom: '2rem'
         }}>
-          {filteredArticles.map(article => (
+          {articles.map(article => (
             <ArticleTile 
               key={article.id} 
               article={article.attributes || article} 
